@@ -80,3 +80,72 @@
   .eye { transition: none; }
   .face-stage.speaking .mouth i:first-child { animation: none; }
 }
+
+/* =======================================================
+   MOBILE: PHÓNG TO MẶT ROBOT
+   ======================================================= */
+@media (max-width: 768px) {
+  /* Thu gọn khoảng trống phần trên */
+  .hero,
+  .panel,
+  .card,
+  .container,
+  main {
+    gap: 12px;
+  }
+
+  /* Khu vực chứa mặt robot */
+  #faceStage {
+    width: 100%;
+    min-height: 46vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 8px 6px;
+  }
+
+  /* Phóng to đầu robot */
+  #robotHead {
+    width: min(96vw, 760px);
+    max-width: none;
+    aspect-ratio: 1.5 / 1;
+    margin: 0 auto;
+  }
+
+  /* Nếu có khung bao ngoài mặt robot */
+  .robot-wrap,
+  .robot-shell,
+  .robot-card,
+  .face-wrap {
+    width: 100%;
+    padding: 8px;
+  }
+
+  /* Giảm bớt text mô tả để nhường chỗ cho mặt robot */
+  #sessionStatus {
+    font-size: 15px;
+    line-height: 1.35;
+    margin-top: 4px;
+  }
+
+  #speechLabel {
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    margin-top: 4px;
+  }
+
+  /* Nút nhận lệnh vẫn giữ vừa mắt */
+  #commandButton {
+    width: 180px;
+    height: 180px;
+    margin: 10px auto 0;
+  }
+
+  #commandButton strong {
+    font-size: 28px;
+  }
+
+  #commandButton small {
+    font-size: 15px;
+  }
+}
