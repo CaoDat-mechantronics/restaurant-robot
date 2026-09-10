@@ -2,91 +2,415 @@
 <html lang="vi">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#07111f">
+
+  <meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,viewport-fit=cover"
+  >
+
+  <meta
+    name="theme-color"
+    content="#07111f"
+  >
+
   <title>Robot Service AI</title>
-  <link rel="stylesheet" href="styles.css">
+
+  <link
+    rel="stylesheet"
+    href="styles.css"
+  >
 </head>
+
 <body>
+
 <div class="app">
+
+  <!-- =====================================================
+       TOP BAR
+       ===================================================== -->
   <header class="topbar">
-    <div class="brand"><i></i><div><b>ROBOT SERVICE</b><small>Gemini Live · HiveMQ</small></div></div>
-    <div class="top-actions">
-      <select id="robotSelect"><option value="1">Robot 1</option><option value="2">Robot 2</option></select>
-      <button id="logoutButton" class="ghost">Đăng xuất</button>
+
+    <div class="brand">
+      <i></i>
+
+      <div>
+        <b>ROBOT SERVICE</b>
+        <small>Gemini Live · HiveMQ</small>
+      </div>
     </div>
+
+    <div class="top-actions">
+
+      <select id="robotSelect">
+        <option value="1">
+          Robot 1
+        </option>
+
+        <option value="2">
+          Robot 2
+        </option>
+      </select>
+
+      <button
+        id="logoutButton"
+        class="ghost"
+      >
+        Đăng xuất
+      </button>
+
+    </div>
+
   </header>
 
+
+  <!-- =====================================================
+       MAIN
+       ===================================================== -->
   <main class="layout">
-    <section class="face-stage" id="faceStage">
-      <div class="state-line"><span id="liveDot" class="dot"></span><span id="sessionStatus">Chưa kết nối Gemini</span></div>
-      <div class="robot-head" id="robotHead">
-        <div class="antenna"><i></i></div>
-        <div class="eyes"><div class="eye"><i class="pupil"></i></div><div class="eye"><i class="pupil"></i></div></div>
-        <div class="cheek left"></div><div class="cheek right"></div>
-        <div class="mouth"><i></i><i></i><i></i><i></i><i></i></div>
+
+
+    <!-- ===================================================
+         ROBOT FACE
+         =================================================== -->
+    <section
+      class="face-stage"
+      id="faceStage"
+    >
+
+      <!-- STATE -->
+      <div class="state-line">
+
+        <span
+          id="liveDot"
+          class="dot"
+        ></span>
+
+        <span id="sessionStatus">
+          Chưa kết nối Gemini
+        </span>
+
       </div>
-      <div class="speech"><b id="speechLabel">SẴN SÀNG</b><p id="assistantText">Nhấn “Nhận lệnh” rồi nói: “Mang món Pizza đến bàn số 7”.</p></div>
-      <button id="commandButton" class="command">
-        <span class="finger"><i></i><i></i><i></i><i></i></span>
-        <strong>NHẬN LỆNH</strong><small>Bật Gemini Live</small>
+
+
+      <!-- ROBOT HEAD -->
+      <div
+        class="robot-head"
+        id="robotHead"
+      >
+
+        <div class="antenna">
+          <i></i>
+        </div>
+
+
+        <div class="eyes">
+
+          <div class="eye">
+            <i class="pupil"></i>
+          </div>
+
+          <div class="eye">
+            <i class="pupil"></i>
+          </div>
+
+        </div>
+
+
+        <div class="cheek left"></div>
+        <div class="cheek right"></div>
+
+
+        <div class="mouth">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </div>
+
+      </div>
+
+
+      <!-- SPEECH -->
+      <div class="speech">
+
+        <b id="speechLabel">
+          SẴN SÀNG
+        </b>
+
+        <!--
+          Cố ý để trống.
+
+          Không xóa element này vì app.js vẫn dùng
+          #assistantText để hiển thị thông báo Gemini,
+          kết quả tool và lỗi.
+        -->
+        <p id="assistantText"></p>
+
+      </div>
+
+
+      <!-- COMMAND BUTTON -->
+      <button
+        id="commandButton"
+        class="command"
+      >
+
+        <span class="finger">
+          <i></i>
+          <i></i>
+          <i></i>
+          <i></i>
+        </span>
+
+        <strong>
+          NHẬN LỆNH
+        </strong>
+
+        <small>
+          Bật Gemini Live
+        </small>
+
       </button>
+
     </section>
 
+
+    <!-- ===================================================
+         RIGHT / BOTTOM PANEL
+         =================================================== -->
     <aside class="panel">
+
+
+      <!-- STATUS -->
       <section class="card">
-        <div class="card-title">Trạng thái</div>
+
+        <div class="card-title">
+          Trạng thái
+        </div>
+
         <div class="status-grid">
-          <div><span>Backend</span><b id="backendState">...</b></div>
-          <div><span>Gemini</span><b id="geminiState">...</b></div>
-          <div><span>HiveMQ</span><b id="mqttState">...</b></div>
-          <div><span>Robot</span><b id="robotState">Robot 1</b></div>
-        </div>
-      </section>
 
-      <section class="card">
-        <div class="card-title">Lệnh giao gần nhất</div>
-        <div id="routeEmpty" class="muted">Chưa có món được xác nhận.</div>
-        <div id="routeContent" hidden>
-          <h2 id="routeFood">-</h2>
-          <div class="route-grid">
-            <div><span>Bàn</span><b id="routeTable">-</b></div>
-            <div><span>Line</span><b id="routeLine">-</b></div>
-            <div><span>Ngã 3</span><b id="routeTurn">-</b></div>
-            <div><span>Điểm dừng</span><b id="routeStop">-</b></div>
+          <div>
+            <span>Backend</span>
+            <b id="backendState">...</b>
           </div>
+
+          <div>
+            <span>Gemini</span>
+            <b id="geminiState">...</b>
+          </div>
+
+          <div>
+            <span>HiveMQ</span>
+            <b id="mqttState">...</b>
+          </div>
+
+          <div>
+            <span>Robot</span>
+            <b id="robotState">
+              Robot 1
+            </b>
+          </div>
+
         </div>
+
       </section>
 
+
+      <!-- LAST DELIVERY -->
       <section class="card">
-        <div class="card-title">Hội thoại</div>
-        <div id="transcript" class="transcript"><div class="msg system"><small>Hệ thống</small><p>Đăng nhập rồi nhấn Nhận lệnh.</p></div></div>
+
+        <div class="card-title">
+          Lệnh giao gần nhất
+        </div>
+
+        <div
+          id="routeEmpty"
+          class="muted"
+        >
+          Chưa có món được xác nhận.
+        </div>
+
+
+        <div
+          id="routeContent"
+          hidden
+        >
+
+          <h2 id="routeFood">
+            -
+          </h2>
+
+          <div class="route-grid">
+
+            <div>
+              <span>Bàn</span>
+              <b id="routeTable">-</b>
+            </div>
+
+            <div>
+              <span>Line</span>
+              <b id="routeLine">-</b>
+            </div>
+
+            <div>
+              <span>Ngã 3</span>
+              <b id="routeTurn">-</b>
+            </div>
+
+            <div>
+              <span>Điểm dừng</span>
+              <b id="routeStop">-</b>
+            </div>
+
+          </div>
+
+        </div>
+
       </section>
 
-      <details class="card" open>
-        <summary>Debug bằng text</summary>
-        <p class="muted">Test tool calling không cần microphone.</p>
-        <div class="debug-row"><input id="debugText" value="Mang món Pizza đến bàn số 7"><button id="sendDebugButton">Gửi</button></div>
+
+      <!-- TRANSCRIPT -->
+      <section class="card">
+
+        <div class="card-title">
+          Hội thoại
+        </div>
+
+        <div
+          id="transcript"
+          class="transcript"
+        >
+
+          <div class="msg system">
+
+            <small>
+              Hệ thống
+            </small>
+
+            <p>
+              Đăng nhập rồi nhấn Nhận lệnh.
+            </p>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- DEBUG -->
+      <details
+        class="card"
+        open
+      >
+
+        <summary>
+          Debug bằng text
+        </summary>
+
+        <p class="muted">
+          Test tool calling không cần microphone.
+        </p>
+
+
+        <div class="debug-row">
+
+          <input
+            id="debugText"
+            value="Mang món Pizza đến bàn số 7"
+          >
+
+          <button id="sendDebugButton">
+            Gửi
+          </button>
+
+        </div>
+
+
         <pre id="debugLog"></pre>
+
       </details>
+
     </aside>
+
   </main>
+
 </div>
 
-<div id="loginOverlay" class="login-overlay">
-  <form id="loginForm" class="login-card">
-    <div class="mini-face">● ᴗ ●</div>
-    <h1>Robot Service</h1>
-    <p>Đăng nhập bằng manager/admin hiện có.</p>
-    <label>Username<input id="usernameInput" required autocomplete="username"></label>
-    <label>Password<input id="passwordInput" type="password" required autocomplete="current-password"></label>
-    <button id="loginButton">Đăng nhập</button><div id="loginError" class="error-text"></div>
+
+<!-- =====================================================
+     LOGIN
+     ===================================================== -->
+<div
+  id="loginOverlay"
+  class="login-overlay"
+>
+
+  <form
+    id="loginForm"
+    class="login-card"
+  >
+
+    <div class="mini-face">
+      ● ᴗ ●
+    </div>
+
+    <h1>
+      Robot Service
+    </h1>
+
+    <p>
+      Đăng nhập bằng manager/admin hiện có.
+    </p>
+
+
+    <label>
+      Username
+
+      <input
+        id="usernameInput"
+        required
+        autocomplete="username"
+      >
+    </label>
+
+
+    <label>
+      Password
+
+      <input
+        id="passwordInput"
+        type="password"
+        required
+        autocomplete="current-password"
+      >
+    </label>
+
+
+    <button id="loginButton">
+      Đăng nhập
+    </button>
+
+
+    <div
+      id="loginError"
+      class="error-text"
+    ></div>
+
   </form>
+
 </div>
 
+
+<!-- =====================================================
+     JAVASCRIPT
+     ===================================================== -->
 <script src="config.js"></script>
 <script src="audio.js"></script>
 <script src="gemini-live.js"></script>
 <script src="app.js"></script>
+
 </body>
 </html>
