@@ -21,6 +21,12 @@
 
     live: null,
 
+    robots: {},
+
+    statusRefreshing: false,
+
+    statusRefreshTimer: null,
+
     logs: []
   };
 
@@ -659,7 +665,190 @@
   // ROBOT-AI STATUS
   // =====================================================
 
-  async function refreshStatus() {
+  function robotKey(
+    robotNumber = state.robot
+  ) {
+    return `robot_${Number(robotNumber)}`;
+  }
+
+  function robotStatusLabel(status) {
+    const value =
+      String(status || "disconnected")
+        .toLowerCase();
+
+    if (value === "available") {
+      return "AVAILABLE";
+    }
+
+    if (value === "on_task") {
+      return "ON TASK";
+    }
+
+    return "DISCONNECTED";
+  }
+
+  function robotStatusClass(status) {
+    const value =
+      String(status || "disconnected")
+        .toLowerCase();
+
+    if (value === "available") {
+      return "good";
+    }
+
+    if (value === "on_task") {
+      return "warn";
+    }
+
+    return "bad";
+  }
+
+  function formatHeartbeat(value) {
+    if (!value) {
+      return "chưa có heartbeat";
+    }
+
+    const time = new Date(value);
+
+    if (Number.isNaN(time.getTime())) {
+      return "heartbeat không hợp lệ";
+    }
+
+    return (
+      "heartbeat " +
+      time.toLocaleTimeString(
+        "vi-VN",
+        {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        }
+      )
+    );
+  }
+
+  function renderSelectedRobotStatus() {
+    const robot =
+      state.robots[
+        robotKey()
+      ] || {};
+
+    const status =
+      String(
+        robot.status ||
+        "disconnected"
+      ).toLowerCase();
+
+    const statusElement =
+      $("robotState");
+
+    statusElement.textContent =
+      `Robot ${state.robot} · ${robotStatusLabel(status)}`;
+
+    statusElement.className =
+      `robot-state ${robotStatusClass(status)}`;
+
+    const meta = [];
+
+    if (
+      robot.wifi_connected === true
+    ) {
+      meta.push("WiFi: connected");
+    } else if (
+      robot.wifi_connected === false
+    ) {
+      meta.push("WiFi: disconnected");
+    } else {
+      meta.push("WiFi: chưa rõ");
+    }
+
+    if (
+      Number.isFinite(
+        Number(robot.rssi)
+      )
+    ) {
+      meta.push(
+        `RSSI: ${Number(robot.rssi)} dBm`
+      );
+    }
+
+    meta.push(
+      formatHeartbeat(
+        robot.last_heartbeat
+      )
+    );
+
+    $("robotPresenceMeta")
+      .textContent =
+      meta.join(" · ");
+
+    const task =
+      robot.tasks;
+
+    const hasTask =
+      task &&
+      typeof task === "object" &&
+      !Array.isArray(task) &&
+      Object.keys(task).length > 0;
+
+    $("robotTaskCard")
+      .hidden =
+      !hasTask;
+
+    if (!hasTask) {
+      $("robotTaskFood")
+        .textContent = "-";
+
+      $("robotTaskTable")
+        .textContent = "-";
+
+      $("robotTaskLine")
+        .textContent = "-";
+
+      $("robotTaskTurn")
+        .textContent = "-";
+
+      $("robotTaskStop")
+        .textContent = "-";
+
+      return;
+    }
+
+    $("robotTaskFood")
+      .textContent =
+      task.food_name ||
+      "Món ăn";
+
+    $("robotTaskTable")
+      .textContent =
+      task.table ?? "-";
+
+    $("robotTaskLine")
+      .textContent =
+      task.line != null
+        ? `Line ${task.line}`
+        : "-";
+
+    $("robotTaskTurn")
+      .textContent =
+      task.junction_turn_vi ||
+      task.junction_turn ||
+      "-";
+
+    $("robotTaskStop")
+      .textContent =
+      task.stop_index ?? "-";
+  }
+
+  async function refreshStatus(
+    { silent = false } = {}
+  ) {
+    if (state.statusRefreshing) {
+      return;
+    }
+
+    state.statusRefreshing = true;
+
     try {
       const data =
         await api(
@@ -732,10 +921,17 @@
           "warn";
       }
 
-      log(
-        "STATUS OK " +
-        JSON.stringify(data)
-      );
+      state.robots =
+        data.robots || {};
+
+      renderSelectedRobotStatus();
+
+      if (!silent) {
+        log(
+          "STATUS OK " +
+          JSON.stringify(data)
+        );
+      }
 
     } catch (error) {
       // ===============================================
@@ -776,11 +972,36 @@
         .className =
         "bad";
 
-      log(
-        "STATUS ERROR: " +
-        error.message
-      );
+      if (!silent) {
+        log(
+          "STATUS ERROR: " +
+          error.message
+        );
+      }
+    } finally {
+      state.statusRefreshing = false;
     }
+  }
+
+  function startStatusPolling() {
+    if (state.statusRefreshTimer) {
+      return;
+    }
+
+    state.statusRefreshTimer =
+      window.setInterval(
+        () => {
+          if (
+            getToken() &&
+            document.visibilityState !== "hidden"
+          ) {
+            refreshStatus({
+              silent: true
+            });
+          }
+        },
+        5000
+      );
   }
 
   // =====================================================
@@ -964,9 +1185,11 @@
               .value
           );
 
-        $("robotState")
-          .textContent =
-          `Robot ${state.robot}`;
+        renderSelectedRobotStatus();
+
+        refreshStatus({
+          silent: true
+        });
 
         log(
           `SELECT Robot ${state.robot}`
@@ -1175,6 +1398,20 @@
     }
   );
 
+  document.addEventListener(
+    "visibilitychange",
+    () => {
+      if (
+        document.visibilityState === "visible" &&
+        getToken()
+      ) {
+        refreshStatus({
+          silent: true
+        });
+      }
+    }
+  );
+
   // =====================================================
   // STARTUP
   // =====================================================
@@ -1184,9 +1421,9 @@
       "closed"
     );
 
-    $("robotState")
-      .textContent =
-      `Robot ${state.robot}`;
+    renderSelectedRobotStatus();
+
+    startStatusPolling();
 
     // Không có token → hiện login.
     if (!getToken()) {

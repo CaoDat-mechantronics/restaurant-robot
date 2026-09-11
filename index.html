@@ -206,13 +206,56 @@
             <b id="mqttState">...</b>
           </div>
 
-          <div>
+          <div class="robot-status-box">
             <span>Robot</span>
-            <b id="robotState">
-              Robot 1
+            <b id="robotState" class="robot-state">
+              Robot 1 · ...
             </b>
           </div>
 
+        </div>
+
+        <div
+          id="robotPresenceMeta"
+          class="robot-presence-meta muted"
+        >
+          Đang chờ trạng thái heartbeat...
+        </div>
+
+        <div
+          id="robotTaskCard"
+          class="robot-task-card"
+          hidden
+        >
+          <div class="robot-task-title">
+            Nhiệm vụ hiện tại
+          </div>
+
+          <h2 id="robotTaskFood">
+            -
+          </h2>
+
+          <div class="robot-task-grid">
+            <div>
+              <span>Bàn</span>
+              <b id="robotTaskTable">-</b>
+            </div>
+
+            <div>
+              <span>Line</span>
+              <b id="robotTaskLine">-</b>
+            </div>
+
+            <div>
+              <span>Ngã 3</span>
+              <b id="robotTaskTurn">-</b>
+            </div>
+
+            <div>
+              <span>Điểm dừng</span>
+              <b id="robotTaskStop">-</b>
+            </div>
+          </div>
         </div>
 
       </section>
