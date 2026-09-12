@@ -29,6 +29,7 @@
 
       this.state = NAV_STATE.IDLE;
       this.task = null;
+
       this.sensors = {
         ir2: false,
         ir3: false,
@@ -45,11 +46,16 @@
       this.turnStartYaw = null;
       this.turnDirection = null;
       this.reacquireStableFrames = 0;
+
       this.tJunctionHits = 0;
       this.lastTJunctionQrAt = 0;
       this.lastTJunctionHandledAt = 0;
       this.qrStopPending = false;
     }
+
+    // =====================================================
+    // LIFECYCLE
+    // =====================================================
 
     start(task) {
       this.task = { ...task };
@@ -58,7 +64,9 @@
       this.reacquireStableFrames = 0;
       this.tJunctionHits = 0;
       this.qrStopPending = false;
+      this.lastVision = null;
       this.lastLineSeenAt = performance.now();
+      this.lastMotor = { left: 0, right: 0 };
 
       this.setState(NAV_STATE.LINE_FOLLOW);
 
@@ -92,14 +100,20 @@
       }
 
       this.state = state;
+
       this.onState({
         state,
         detail,
         task: this.task,
         turnDirection: this.turnDirection
       });
+
       this.onDebug(`NAV ${state}${detail ? `: ${detail}` : ""}`);
     }
+
+    // =====================================================
+    // SENSOR / VISION INPUT
+    // =====================================================
 
     updateSensors(payload = {}) {
       this.sensors = {
@@ -116,18 +130,21 @@
 
     updateVision(frame) {
       this.lastVision = frame;
-      if (frame?.hasBothLines) {
+
+      if (frame?.hasLane) {
         this.lastLineSeenAt = performance.now();
       }
     }
+
+    // =====================================================
+    // QR T-JUNCTION
+    // =====================================================
 
     handleQr(qr) {
       if (this.state !== NAV_STATE.LINE_FOLLOW) {
         return;
       }
 
-      // Tương thích cả kiểu cũ handleQr("T-junction")
-      // và kiểu mới handleQr({ text, areaPercent, areaPx, ... }).
       const payload =
         typeof qr === "string"
           ? { text: qr }
@@ -148,18 +165,17 @@
       }
 
       const areaPercent = Number(payload.areaPercent);
-      const stopPercent =
-        Math.max(0, Number(this.config.T_JUNCTION_STOP_AREA_PERCENT) || 12);
+      const stopPercent = Math.max(
+        0,
+        Number(this.config.T_JUNCTION_STOP_AREA_PERCENT) || 12
+      );
 
       const now = performance.now();
 
-      // Không xử lý lại cùng QR ngay sau khi vừa rẽ xong.
       if (now - this.lastTJunctionHandledAt < 3500) {
         return;
       }
 
-      // Chỉ dừng khi QR đã đủ lớn theo ngưỡng đo thực nghiệm.
-      // Nếu detector chưa trả được diện tích hoặc QR còn quá xa, tiếp tục bám line.
       if (!Number.isFinite(areaPercent) || areaPercent < stopPercent) {
         this.tJunctionHits = 0;
         this.qrStopPending = false;
@@ -174,12 +190,13 @@
       this.tJunctionHits += 1;
       this.qrStopPending = true;
 
-      // Vừa đạt ngưỡng là dừng ngay.
-      // Trong lúc chờ đủ số lần xác nhận QR, controlLineFollow() sẽ giữ motor = 0.
+      // STOP phải tức thời, không áp motor slew-rate.
       this.sendMotor(0, 0, true);
 
-      const required =
-        Math.max(1, Number(this.config.T_JUNCTION_STABLE_COUNT) || 2);
+      const required = Math.max(
+        1,
+        Number(this.config.T_JUNCTION_STABLE_COUNT) || 2
+      );
 
       if (this.tJunctionHits >= required) {
         this.tJunctionHits = 0;
@@ -199,14 +216,14 @@
           .trim()
           .toUpperCase();
 
-      // Fallback theo route hiện tại của backend:
+      // Fallback route hiện tại:
       // Line 1 -> LEFT, Line 2 -> RIGHT.
       if (!direction) {
         if (Number(this.task.line) === 1) direction = "LEFT";
         if (Number(this.task.line) === 2) direction = "RIGHT";
       }
 
-      if (!['LEFT', 'RIGHT'].includes(direction)) {
+      if (!["LEFT", "RIGHT"].includes(direction)) {
         this.fail("Task không có hướng rẽ LEFT/RIGHT hợp lệ.");
         return;
       }
@@ -225,6 +242,7 @@
         NAV_STATE.T_JUNCTION_DETECTED,
         `QR T-junction, chuẩn bị rẽ ${direction}`
       );
+
       this.sendMotor(0, 0, true);
 
       window.setTimeout(() => {
@@ -233,6 +251,10 @@
         }
       }, 160);
     }
+
+    // =====================================================
+    // CONTROL LOOP
+    // =====================================================
 
     controlLoop() {
       if (!this.task) {
@@ -260,10 +282,12 @@
       }
     }
 
+    // =====================================================
+    // LINE FOLLOW V2
+    // lateral + heading + confidence + curve slowdown
+    // =====================================================
+
     controlLineFollow() {
-      // Khi QR T-junction đã đạt ngưỡng diện tích, giữ robot đứng yên
-      // trong lúc chờ đủ số lần xác nhận QR. Nếu mất QR > 1.2 giây,
-      // bỏ trạng thái chờ và tiếp tục bám line.
       if (this.qrStopPending) {
         if (performance.now() - this.lastTJunctionQrAt > 1200) {
           this.qrStopPending = false;
@@ -274,53 +298,155 @@
         }
       }
 
-      // IR2 = biên trái. Chạm biên trái -> ép xe sang phải.
+      // IR2 = biên trái. Chạm trái -> ép sang phải.
       if (this.sensors.ir2 && !this.sensors.ir3) {
         this.sendMotor(
           Number(this.config.BORDER_FAST_SPEED) || 145,
-          Number(this.config.BORDER_SLOW_SPEED) || 65
+          Number(this.config.BORDER_SLOW_SPEED) || 65,
+          true
         );
         return;
       }
 
-      // IR3 = biên phải. Chạm biên phải -> ép xe sang trái.
+      // IR3 = biên phải. Chạm phải -> ép sang trái.
       if (this.sensors.ir3 && !this.sensors.ir2) {
         this.sendMotor(
           Number(this.config.BORDER_SLOW_SPEED) || 65,
-          Number(this.config.BORDER_FAST_SPEED) || 145
+          Number(this.config.BORDER_FAST_SPEED) || 145,
+          true
         );
         return;
       }
 
-      if (!this.lastVision?.hasBothLines || this.lastVision.lineError == null) {
+      const frame = this.lastVision;
+
+      if (
+        !frame?.hasLane ||
+        frame.lineError == null ||
+        frame.headingErrorDeg == null
+      ) {
         const lostFor = performance.now() - this.lastLineSeenAt;
-        if (lostFor >= (Number(this.config.LINE_LOST_STOP_MS) || 900)) {
+
+        if (lostFor >= (Number(this.config.LINE_LOST_STOP_MS) || 850)) {
           this.sendMotor(0, 0, true);
         }
+
+        // Không publish lệnh mới khi vision chưa đáng tin.
+        // Motor watchdog phía ESP32 sẽ dừng xe nếu MQTT motor bị mất.
         return;
       }
 
-      const base = Number(this.config.BASE_SPEED) || 125;
-      const kp = Number(this.config.LINE_KP) || 0.30;
-      const max = Number(this.config.MAX_SPEED) || 190;
-      const correction = this.lastVision.lineError * kp;
+      const confidence = this.clamp(
+        Number(frame.laneConfidence) || 0,
+        0,
+        1
+      );
 
-      const left = this.clamp(base + correction, -max, max);
-      const right = this.clamp(base - correction, -max, max);
-      this.sendMotor(left, right);
+      const minConfidence = this.clamp(
+        Number(this.config.VISION_MIN_CONFIDENCE) || 0.38,
+        0.05,
+        0.95
+      );
+
+      const slowConfidence = this.clamp(
+        Number(this.config.VISION_SLOW_CONFIDENCE) || 0.62,
+        minConfidence,
+        0.98
+      );
+
+      if (confidence < minConfidence) {
+        return;
+      }
+
+      const configuredBase = Number(this.config.BASE_SPEED) || 122;
+      const minCurveSpeed = Math.min(
+        configuredBase,
+        Number(this.config.MIN_CURVE_SPEED) || 68
+      );
+
+      const maxSpeed = Number(this.config.MAX_SPEED) || 190;
+      const kp = Number(this.config.LINE_KP) || 0.24;
+      const kh = Number(this.config.LINE_KH) || 1.15;
+
+      const heading = Number(frame.headingErrorDeg) || 0;
+      const curvature = Number(frame.curvatureDeg) || 0;
+
+      // Heading phản ánh hướng đường phía trước; curvature giúp giảm tốc
+      // thêm ở cua gắt, kể cả khi robot hiện vẫn đang gần tâm.
+      const curveMeasure = Math.max(
+        Math.abs(heading),
+        Math.abs(curvature) * 0.65
+      );
+
+      const fullSlowdownDeg = Math.max(
+        8,
+        Number(this.config.CURVE_FULL_SLOWDOWN_DEG) || 28
+      );
+
+      const curveRatio = this.clamp(
+        curveMeasure / fullSlowdownDeg,
+        0,
+        1
+      );
+
+      let baseSpeed =
+        configuredBase -
+        curveRatio * (configuredBase - minCurveSpeed);
+
+      // Khi confidence trung bình, giảm tốc để vision có thời gian ổn định.
+      if (confidence < slowConfidence) {
+        const confidenceRatio = this.clamp(
+          (confidence - minConfidence) /
+          Math.max(0.001, slowConfidence - minConfidence),
+          0,
+          1
+        );
+
+        baseSpeed = Math.max(
+          minCurveSpeed,
+          minCurveSpeed +
+          confidenceRatio * (baseSpeed - minCurveSpeed)
+        );
+      }
+
+      const correction =
+        frame.lineError * kp +
+        heading * kh;
+
+      const leftTarget = this.clamp(
+        baseSpeed + correction,
+        -maxSpeed,
+        maxSpeed
+      );
+
+      const rightTarget = this.clamp(
+        baseSpeed - correction,
+        -maxSpeed,
+        maxSpeed
+      );
+
+      this.sendMotor(leftTarget, rightTarget);
     }
+
+    // =====================================================
+    // GYRO TURN
+    // =====================================================
 
     controlTurn() {
       const yaw = this.orientation.getYaw();
+
       if (yaw == null || this.turnStartYaw == null) {
         this.fail("Mất dữ liệu orientation trong lúc rẽ.");
         return;
       }
 
       const relative =
-        window.RobotOrientation.deltaDegrees(yaw, this.turnStartYaw);
-      const angle = Math.abs(relative);
+        window.RobotOrientation.deltaDegrees(
+          yaw,
+          this.turnStartYaw
+        );
 
+      const angle = Math.abs(relative);
       const searchAt =
         Number(this.config.TURN_START_LINE_SEARCH_DEG) || 68;
       const maxAngle =
@@ -328,14 +454,24 @@
       const target =
         Number(this.config.TURN_TARGET_DEG) || 90;
 
+      const frame = this.lastVision;
+      const confidence = Number(frame?.laneConfidence) || 0;
+      const minConfidence =
+        Number(this.config.VISION_MIN_CONFIDENCE) || 0.38;
+
+      // Chỉ chấp nhận line mới khi thực sự thấy cả hai biên, confidence đủ
+      // và tâm đã tương đối gần giữa ảnh.
       if (
         angle >= searchAt &&
-        this.lastVision?.hasBothLines &&
-        this.lastVision.lineError != null &&
-        Math.abs(this.lastVision.lineError) < this.lastVision.width * 0.22
+        frame?.hasBothLines &&
+        frame?.hasLane &&
+        confidence >= minConfidence &&
+        frame.lineError != null &&
+        Math.abs(frame.lineError) < frame.width * 0.22
       ) {
         this.sendMotor(0, 0, true);
         this.reacquireStableFrames = 0;
+
         this.setState(
           NAV_STATE.REACQUIRE_LINE,
           `Đã thấy line mới ở ${angle.toFixed(1)}°`
@@ -361,7 +497,6 @@
         speed = Number(this.config.TURN_SLOW_SPEED) || 72;
       }
 
-      // Nếu đã vượt góc mục tiêu nhưng chưa thấy line, chỉ quay chậm để tìm.
       if (angle >= target) {
         speed = Number(this.config.TURN_SLOW_SPEED) || 72;
       }
@@ -374,23 +509,51 @@
       }
     }
 
+    // =====================================================
+    // REACQUIRE LINE
+    // =====================================================
+
     controlReacquireLine() {
-      if (!this.lastVision?.hasBothLines || this.lastVision.lineError == null) {
+      const frame = this.lastVision;
+      const minConfidence =
+        Number(this.config.VISION_MIN_CONFIDENCE) || 0.38;
+
+      if (
+        !frame?.hasLane ||
+        !frame?.hasBothLines ||
+        frame.lineError == null ||
+        frame.headingErrorDeg == null ||
+        (Number(frame.laneConfidence) || 0) < minConfidence
+      ) {
         this.reacquireStableFrames = 0;
         this.sendMotor(0, 0, true);
         return;
       }
 
-      const base = Math.min(88, Number(this.config.BASE_SPEED) || 125);
-      const kp = Number(this.config.LINE_KP) || 0.30;
-      const correction = this.lastVision.lineError * kp;
-
-      this.sendMotor(
-        this.clamp(base + correction, 40, 110),
-        this.clamp(base - correction, 40, 110)
+      const base = Math.min(
+        88,
+        Number(this.config.BASE_SPEED) || 122
       );
 
-      if (Math.abs(this.lastVision.lineError) < this.lastVision.width * 0.12) {
+      const kp = Number(this.config.LINE_KP) || 0.24;
+      const kh = Number(this.config.LINE_KH) || 1.15;
+
+      const correction =
+        frame.lineError * kp +
+        frame.headingErrorDeg * kh;
+
+      this.sendMotor(
+        this.clamp(base + correction, 38, 110),
+        this.clamp(base - correction, 38, 110)
+      );
+
+      const centered =
+        Math.abs(frame.lineError) < frame.width * 0.10;
+
+      const headingReady =
+        Math.abs(frame.headingErrorDeg) < 12;
+
+      if (centered && headingReady) {
         this.reacquireStableFrames += 1;
       }
       else {
@@ -405,21 +568,66 @@
       }
     }
 
+    // =====================================================
+    // MOTOR OUTPUT + SLEW RATE LIMIT
+    // =====================================================
+
     sendMotor(left, right, force = false) {
       const now = performance.now();
-      const interval = Math.max(30, Number(this.config.MOTOR_INTERVAL_MS) || 70);
+      const interval = Math.max(
+        30,
+        Number(this.config.MOTOR_INTERVAL_MS) || 70
+      );
 
       if (!force && now - this.lastMotorAt < interval * 0.8) {
         return;
       }
 
+      let nextLeft = Number(left) || 0;
+      let nextRight = Number(right) || 0;
+
+      if (!force) {
+        const maxDelta = Math.max(
+          1,
+          Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 20
+        );
+
+        const deltaLeft = nextLeft - this.lastMotor.left;
+        const deltaRight = nextRight - this.lastMotor.right;
+        const largestDelta = Math.max(
+          Math.abs(deltaLeft),
+          Math.abs(deltaRight)
+        );
+
+        // Scale cả vector PWM cùng một tỷ lệ để vẫn giữ chênh lệch
+        // trái/phải. Nếu clamp từng bánh riêng, giai đoạn tăng tốc có thể
+        // vô tình biến một lệnh cua thành hai bánh bằng nhau.
+        if (largestDelta > maxDelta) {
+          const scale = maxDelta / largestDelta;
+          nextLeft = this.lastMotor.left + deltaLeft * scale;
+          nextRight = this.lastMotor.right + deltaRight * scale;
+        }
+      }
+
+      const maxSpeed = Math.max(
+        1,
+        Number(this.config.MAX_SPEED) || 190
+      );
+
+      nextLeft = this.clamp(nextLeft, -maxSpeed, maxSpeed);
+      nextRight = this.clamp(nextRight, -maxSpeed, maxSpeed);
+
       this.lastMotorAt = now;
       this.lastMotor = {
-        left: Math.round(left),
-        right: Math.round(right)
+        left: Math.round(nextLeft),
+        right: Math.round(nextRight)
       };
 
-      this.mqtt.publishMotor(left, right);
+      this.mqtt.publishMotor(
+        this.lastMotor.left,
+        this.lastMotor.right
+      );
+
       this.onMotor({ ...this.lastMotor });
     }
 

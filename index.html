@@ -190,8 +190,8 @@
       >
         <div class="camera-debug-header">
           <div>
-            <b>Camera · Line Detection</b>
-            <small>Khung xanh: line · vàng: tâm ảnh · xanh dương: tâm đường</small>
+            <b>Camera · Line Detection V2</b>
+            <small>Chấm/xanh: điểm line · xanh lá: curve biên · xanh dương: center curve · hồng: look-ahead · vàng: tâm camera</small>
           </div>
 
           <button
@@ -211,12 +211,27 @@
         <div class="vision-debug-grid">
           <div><span>Line trái</span><b id="visionLeftState">-</b></div>
           <div><span>Line phải</span><b id="visionRightState">-</b></div>
-          <div><span>Tâm đường</span><b id="visionCenterState">-</b></div>
-          <div><span>Sai số</span><b id="visionErrorState">-</b></div>
+
+          <div><span>Tâm lọc</span><b id="visionCenterState">-</b></div>
+          <div><span>Sai số lọc</span><b id="visionErrorState">-</b></div>
+
+          <div><span>Tâm raw</span><b id="visionRawCenterState">-</b></div>
+          <div><span>Sai số raw</span><b id="visionRawErrorState">-</b></div>
+
+          <div><span>Otsu threshold</span><b id="visionThresholdState">-</b></div>
+          <div><span>Lane confidence</span><b id="visionConfidenceState">-</b></div>
+
+          <div><span>Lane width</span><b id="visionLaneWidthState">-</b></div>
+          <div><span>Look-ahead X</span><b id="visionTargetState">-</b></div>
+
+          <div><span>Heading error</span><b id="visionHeadingState">-</b></div>
+          <div><span>Curvature</span><b id="visionCurvatureState">-</b></div>
+
           <div><span>QR</span><b id="visionQrState">-</b></div>
           <div><span>QR diện tích</span><b id="visionQrAreaState">-</b></div>
-          <div><span>Motor trái</span><b id="visionMotorLeftState">0</b></div>
-          <div><span>Motor phải</span><b id="visionMotorRightState">0</b></div>
+
+          <div><span>Motor trái gửi MQTT</span><b id="visionMotorLeftState">0</b></div>
+          <div><span>Motor phải gửi MQTT</span><b id="visionMotorRightState">0</b></div>
         </div>
       </section>
 

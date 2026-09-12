@@ -194,39 +194,112 @@
     onFrame: (frame) => {
       navigation?.updateVision(frame);
 
-      const left = $("visionLeftState");
-      const right = $("visionRightState");
-      const center = $("visionCenterState");
-      const error = $("visionErrorState");
+      const setText = (id, text, className = "") => {
+        const el = $(id);
+        if (!el) return;
+        el.textContent = text;
+        if (className) el.className = className;
+      };
 
-      if (left) {
-        left.textContent = frame?.leftFound
-          ? `x=${Math.round(frame.leftX)} · ${(frame.leftConfidence * 100).toFixed(0)}%`
-          : "Không thấy";
-        left.className = frame?.leftFound ? "good" : "bad";
-      }
+      const leftLabel = frame?.leftFound
+        ? `x=${Math.round(frame.leftX)} · ${(frame.leftConfidence * 100).toFixed(0)}%${frame.leftInferred ? " · ước lượng" : ""}`
+        : (frame?.leftInferred ? "Ước lượng từ lane width" : "Không thấy");
 
-      if (right) {
-        right.textContent = frame?.rightFound
-          ? `x=${Math.round(frame.rightX)} · ${(frame.rightConfidence * 100).toFixed(0)}%`
-          : "Không thấy";
-        right.className = frame?.rightFound ? "good" : "bad";
-      }
+      const rightLabel = frame?.rightFound
+        ? `x=${Math.round(frame.rightX)} · ${(frame.rightConfidence * 100).toFixed(0)}%${frame.rightInferred ? " · ước lượng" : ""}`
+        : (frame?.rightInferred ? "Ước lượng từ lane width" : "Không thấy");
 
-      if (center) {
-        center.textContent = frame?.laneCenter != null
-          ? `x=${Math.round(frame.laneCenter)}`
-          : "-";
-      }
+      setText(
+        "visionLeftState",
+        leftLabel,
+        frame?.leftFound ? "good" : (frame?.leftInferred ? "warn" : "bad")
+      );
 
-      if (error) {
-        error.textContent = frame?.lineError != null
+      setText(
+        "visionRightState",
+        rightLabel,
+        frame?.rightFound ? "good" : (frame?.rightInferred ? "warn" : "bad")
+      );
+
+      setText(
+        "visionCenterState",
+        frame?.laneCenter != null
+          ? `x=${frame.laneCenter.toFixed(1)}`
+          : "-",
+        frame?.hasLane ? "good" : "warn"
+      );
+
+      setText(
+        "visionErrorState",
+        frame?.lineError != null
           ? `${frame.lineError >= 0 ? "+" : ""}${frame.lineError.toFixed(1)} px`
-          : "-";
-        error.className = frame?.lineError != null && Math.abs(frame.lineError) < 25
+          : "-",
+        frame?.lineError != null && Math.abs(frame.lineError) < 25
           ? "good"
-          : "warn";
-      }
+          : "warn"
+      );
+
+      setText(
+        "visionRawCenterState",
+        frame?.rawLaneCenter != null
+          ? `x=${frame.rawLaneCenter.toFixed(1)}`
+          : "-"
+      );
+
+      setText(
+        "visionRawErrorState",
+        frame?.rawLineError != null
+          ? `${frame.rawLineError >= 0 ? "+" : ""}${frame.rawLineError.toFixed(1)} px`
+          : "-"
+      );
+
+      const thresholdText = Array.isArray(frame?.thresholds)
+        ? frame.thresholds.map((value) => Math.round(value)).join(" / ")
+        : "-";
+
+      setText(
+        "visionThresholdState",
+        `${thresholdText} · dark ${((frame?.darkRatio || 0) * 100).toFixed(1)}%`
+      );
+
+      const laneConfidence = Number(frame?.laneConfidence) || 0;
+      setText(
+        "visionConfidenceState",
+        `${(laneConfidence * 100).toFixed(0)}% · pair ${((frame?.pairCoverage || 0) * 100).toFixed(0)}%`,
+        laneConfidence >= (Number(navConfig.VISION_GOOD_CONFIDENCE) || 0.78)
+          ? "good"
+          : laneConfidence >= (Number(navConfig.VISION_MIN_CONFIDENCE) || 0.38)
+            ? "warn"
+            : "bad"
+      );
+
+      setText(
+        "visionLaneWidthState",
+        frame?.laneWidth != null
+          ? `${frame.laneWidth.toFixed(1)} px`
+          : "-"
+      );
+
+      setText(
+        "visionHeadingState",
+        frame?.headingErrorDeg != null
+          ? `${frame.headingErrorDeg >= 0 ? "+" : ""}${frame.headingErrorDeg.toFixed(1)}°`
+          : "-"
+      );
+
+      setText(
+        "visionCurvatureState",
+        frame?.curvatureDeg != null
+          ? `${frame.curvatureDeg >= 0 ? "+" : ""}${frame.curvatureDeg.toFixed(1)}°`
+          : "-"
+      );
+
+      setText(
+        "visionTargetState",
+        frame?.lookAheadCenter != null
+          ? `x=${frame.lookAheadCenter.toFixed(1)}`
+          : "-"
+      );
     },
     onQr: (qr) => {
       const text = String(qr?.text || "");
