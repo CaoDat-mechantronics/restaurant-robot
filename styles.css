@@ -75,11 +75,14 @@ body {
   z-index: 20;
 }
 
+
 .brand {
   display: flex;
   align-items: center;
+
   gap: 10px;
 }
+
 
 .brand > i,
 .dot {
@@ -94,22 +97,31 @@ body {
     0 0 18px #5de7ffb3;
 }
 
+
 .brand b {
   display: block;
+
   font-size: 13px;
+
   letter-spacing: 0.09em;
 }
 
+
 .brand small {
   display: block;
+
   color: var(--muted);
+
   font-size: 11px;
 }
 
+
 .top-actions {
   display: flex;
+
   gap: 8px;
 }
+
 
 .top-actions select,
 .ghost {
@@ -123,6 +135,7 @@ body {
 
   padding: 8px 10px;
 }
+
 
 .ghost {
   cursor: pointer;
@@ -205,6 +218,7 @@ body {
   gap: 9px;
 
   align-items: center;
+
   justify-content: center;
 
   color: var(--muted);
@@ -214,6 +228,7 @@ body {
   text-align: center;
 }
 
+
 .dot {
   flex: 0 0 auto;
 
@@ -222,6 +237,7 @@ body {
   box-shadow: none;
 }
 
+
 .dot.online {
   background: var(--green);
 
@@ -229,12 +245,14 @@ body {
     0 0 15px #57e4a577;
 }
 
+
 .dot.listening {
   background: var(--cyan);
 
   animation:
     pulse 1s infinite;
 }
+
 
 .dot.error {
   background: var(--red);
@@ -273,6 +291,12 @@ body {
     0 16px 34px #0005;
 }
 
+
+/*
+  Không sử dụng antenna và cheek
+  ở giao diện mặt đen hiện tại.
+*/
+
 .antenna,
 .cheek {
   display: none;
@@ -296,6 +320,7 @@ body {
 
   justify-content: space-between;
 }
+
 
 .eye {
   width: 22%;
@@ -323,6 +348,7 @@ body {
     blink 5s infinite;
 }
 
+
 .pupil {
   display: none;
 }
@@ -347,14 +373,17 @@ body {
   display: flex;
 
   align-items: center;
+
   justify-content: center;
 
   gap: 0;
 }
 
+
 .mouth i {
   display: none;
 }
+
 
 .mouth i:first-child {
   display: block;
@@ -366,6 +395,7 @@ body {
 
   background: #e7f3f5;
 }
+
 
 .face-stage.speaking
 .mouth i:first-child {
@@ -396,6 +426,7 @@ body {
   overflow-wrap: anywhere;
 }
 
+
 .speech b {
   display: block;
 
@@ -406,9 +437,16 @@ body {
   letter-spacing: 0.15em;
 }
 
+
+/*
+  Nếu chưa có câu trả lời Gemini
+  thì paragraph sẽ biến mất hoàn toàn.
+*/
+
 .speech p:empty {
   display: none;
 }
+
 
 .speech p {
   min-height: 0;
@@ -458,6 +496,7 @@ body {
   flex-direction: column;
 
   align-items: center;
+
   justify-content: center;
 
   cursor: pointer;
@@ -465,6 +504,7 @@ body {
   -webkit-tap-highlight-color:
     transparent;
 }
+
 
 .command.active {
   animation:
@@ -487,6 +527,7 @@ body {
   margin-bottom: 6px;
 }
 
+
 .finger i {
   position: absolute;
 
@@ -505,25 +546,30 @@ body {
     translateX(-50%);
 }
 
+
 .finger i:nth-child(1) {
   width: 40px;
   height: 39px;
 }
+
 
 .finger i:nth-child(2) {
   width: 31px;
   height: 31px;
 }
 
+
 .finger i:nth-child(3) {
   width: 22px;
   height: 23px;
 }
 
+
 .finger i:nth-child(4) {
   width: 12px;
   height: 15px;
 }
+
 
 .command strong {
   font-size: 12px;
@@ -532,6 +578,7 @@ body {
 
   letter-spacing: 0.08em;
 }
+
 
 .command small {
   margin-top: 3px;
@@ -575,6 +622,7 @@ body {
     blur(14px);
 }
 
+
 .card-title {
   margin-bottom: 13px;
 
@@ -598,6 +646,7 @@ body {
   gap: 8px;
 }
 
+
 .status-grid div,
 .route-grid div {
   border:
@@ -607,6 +656,7 @@ body {
 
   padding: 10px;
 }
+
 
 .status-grid span,
 .route-grid span {
@@ -619,17 +669,21 @@ body {
   font-size: 11px;
 }
 
+
 .good {
   color: var(--green);
 }
+
 
 .bad {
   color: var(--red);
 }
 
+
 .warn {
   color: #ffd76b;
 }
+
 
 .muted {
   color: var(--muted);
@@ -656,6 +710,7 @@ body {
   gap: 8px;
 }
 
+
 .msg {
   padding: 9px 11px;
 
@@ -667,13 +722,16 @@ body {
   background: #ffffff08;
 }
 
+
 .msg.user {
   background: #5de7ff0e;
 }
 
+
 .msg.assistant {
   background: #57e4a50e;
 }
+
 
 .msg small {
   color: var(--muted);
@@ -682,6 +740,7 @@ body {
 
   letter-spacing: 0.08em;
 }
+
 
 .msg p {
   margin: 4px 0;
@@ -705,6 +764,7 @@ body {
   gap: 7px;
 }
 
+
 .debug-row input {
   min-width: 0;
 
@@ -720,6 +780,7 @@ body {
   color: var(--text);
 }
 
+
 .debug-row button {
   border: 0;
 
@@ -733,6 +794,7 @@ body {
 
   padding: 0 14px;
 }
+
 
 pre {
   max-height: 190px;
@@ -776,9 +838,11 @@ pre {
     blur(18px);
 }
 
+
 .login-overlay.hidden {
   display: none;
 }
+
 
 .login-card {
   width:
@@ -797,22 +861,26 @@ pre {
   background: #0c1b2d;
 }
 
+
 .mini-face {
   color: var(--cyan);
 
   font-size: 32px;
 }
 
+
 .login-card h1 {
   margin:
     10px 0 4px;
 }
+
 
 .login-card p {
   color: var(--muted);
 
   font-size: 13px;
 }
+
 
 .login-card label {
   display: block;
@@ -823,6 +891,7 @@ pre {
 
   font-size: 12px;
 }
+
 
 .login-card input {
   width: 100%;
@@ -841,6 +910,7 @@ pre {
   color: #fff;
 }
 
+
 .login-card button {
   width: 100%;
 
@@ -856,6 +926,7 @@ pre {
 
   font-weight: 850;
 }
+
 
 .error-text {
   min-height: 18px;
@@ -887,6 +958,7 @@ pre {
   }
 }
 
+
 @keyframes referenceTalk {
   from {
     height: 45%;
@@ -903,6 +975,7 @@ pre {
   }
 }
 
+
 @keyframes pulse {
   from {
     box-shadow:
@@ -914,6 +987,7 @@ pre {
       0 0 0 10px #5de7ff00;
   }
 }
+
 
 @keyframes commandPulse {
   0% {
@@ -942,6 +1016,10 @@ pre {
 
 @media (max-width: 820px) {
 
+  /* -------------------------------------------------------
+     TOP BAR
+     ------------------------------------------------------- */
+
   .topbar {
     height: 58px;
 
@@ -949,27 +1027,40 @@ pre {
       8px 10px;
   }
 
-  /*
-    Chỉ ẩn subtitle logo.
-    KHÔNG ẩn toàn bộ .ghost.
-  */
+
+  /* Chỉ ẩn dòng mô tả nhỏ của logo trên mobile. */
   .brand small {
     display: none;
   }
 
+
   /*
-    Chỉ ẩn ghost button nằm trực tiếp trong topbar.
-    Ví dụ nút đăng xuất.
+    Chỉ ẩn nút ghost nằm trực tiếp trong topbar (ví dụ Đăng xuất).
+    KHÔNG ẩn toàn bộ .ghost vì các nút:
+      - Cho phép Gyro/Camera
+      - DEBUG CAMERA
+      - Đóng debug
+    cũng dùng class .ghost và phải hiển thị trên điện thoại.
   */
   .top-actions > .ghost {
     display: none;
   }
+
+
+  /* -------------------------------------------------------
+     PAGE LAYOUT
+     ------------------------------------------------------- */
 
   .layout {
     display: block;
 
     min-height: 0;
   }
+
+
+  /* -------------------------------------------------------
+     ROBOT AREA
+     ------------------------------------------------------- */
 
   .face-stage {
     position: relative;
@@ -1005,17 +1096,31 @@ pre {
     overflow: visible;
   }
 
+
+  /* -------------------------------------------------------
+     STATUS
+     ------------------------------------------------------- */
+
   .state-line {
     min-height: 20px;
 
     font-size: 14px;
   }
 
+
   #sessionStatus {
     font-size: 14px;
 
     line-height: 1.3;
   }
+
+
+  /* -------------------------------------------------------
+     ROBOT HEAD
+
+     QUAN TRỌNG:
+     1.42 / 1 làm mặt robot CAO hơn bản 1.55 / 1 cũ.
+     ------------------------------------------------------- */
 
   .robot-head {
     width:
@@ -1038,6 +1143,8 @@ pre {
       29% 29% 25% 25%;
   }
 
+
+  /* Mắt hơi kéo dài theo chiều dọc */
   .eyes {
     top: 27%;
 
@@ -1047,15 +1154,23 @@ pre {
     height: 39%;
   }
 
+
   .eye {
     width: 22%;
   }
 
+
+  /* Miệng */
   .mouth {
     bottom: 26%;
 
     width: 11%;
   }
+
+
+  /* -------------------------------------------------------
+     SPEECH
+     ------------------------------------------------------- */
 
   .speech {
     width: 96%;
@@ -1063,17 +1178,31 @@ pre {
     margin-top: 0;
   }
 
+
   .speech b {
     font-size: 12px;
 
     letter-spacing: 0.17em;
   }
 
+
   .speech p {
     margin-top: 7px;
 
     font-size: 14px;
   }
+
+
+  /* -------------------------------------------------------
+     COMMAND BUTTON
+
+     BẢN CŨ:
+       180 x 180px
+       strong 28px
+
+     BẢN MỚI:
+       118 x 118px
+     ------------------------------------------------------- */
 
   .command {
     width: 118px;
@@ -1088,6 +1217,7 @@ pre {
       inset 0 0 28px #5de7ff22;
   }
 
+
   .finger {
     width: 32px;
     height: 32px;
@@ -1095,29 +1225,35 @@ pre {
     margin-bottom: 5px;
   }
 
+
   .finger i {
     border-width: 1.7px;
   }
+
 
   .finger i:nth-child(1) {
     width: 31px;
     height: 30px;
   }
 
+
   .finger i:nth-child(2) {
     width: 24px;
     height: 24px;
   }
+
 
   .finger i:nth-child(3) {
     width: 17px;
     height: 18px;
   }
 
+
   .finger i:nth-child(4) {
     width: 10px;
     height: 12px;
   }
+
 
   .command strong {
     font-size: 15px;
@@ -1127,11 +1263,17 @@ pre {
     letter-spacing: 0.05em;
   }
 
+
   .command small {
     margin-top: 4px;
 
     font-size: 10px;
   }
+
+
+  /* -------------------------------------------------------
+     PANEL
+     ------------------------------------------------------- */
 
   .panel {
     padding: 11px;
@@ -1139,10 +1281,12 @@ pre {
     gap: 12px;
   }
 
+
   /*
-    Trên điện thoại vẫn ẩn card trạng thái đầu tiên
-    như thiết kế hiện tại.
+    Trên điện thoại ẩn card trạng thái
+    như giao diện hiện tại.
   */
+
   .panel > .card:first-child {
     display: none;
   }
@@ -1161,14 +1305,17 @@ pre {
     padding-right: 10px;
   }
 
+
   .brand b {
     font-size: 12px;
   }
+
 
   .top-actions select {
     padding:
       8px 9px;
   }
+
 
   .face-stage {
     gap: 13px;
@@ -1178,48 +1325,66 @@ pre {
     padding-right: 6px;
   }
 
+
+  /*
+    Gần sát hai cạnh màn hình.
+  */
+
   .robot-head {
     width:
       calc(100vw - 12px);
 
+    /*
+      Càng nhỏ tỷ lệ này thì
+      mặt càng cao theo chiều dọc.
+    */
     aspect-ratio:
       1.40 / 1;
   }
+
 
   .state-line {
     font-size: 13px;
   }
 
+
   #sessionStatus {
     font-size: 13px;
   }
 
+
   #speechLabel {
     font-size: 11px;
   }
+
 
   .command {
     width: 114px;
     height: 114px;
   }
 
+
   .command strong {
     font-size: 14px;
   }
 
+
   .command small {
     font-size: 9.5px;
   }
+
 
   .route-grid {
     grid-template-columns:
       1fr;
   }
 
+
   .debug-row {
     grid-template-columns:
       1fr;
   }
+
 
   .debug-row button {
     min-height: 42px;
@@ -1239,25 +1404,31 @@ pre {
     padding-top: 12px;
   }
 
+
   .robot-head {
     aspect-ratio:
       1.38 / 1;
   }
+
 
   .command {
     width: 108px;
     height: 108px;
   }
 
+
   .finger {
     width: 29px;
     height: 29px;
   }
 
+
   .command strong {
     font-size: 13px;
   }
 }
+
+
 
 
 /* =========================================================
@@ -1325,8 +1496,7 @@ pre {
 .robot-task-grid {
   display: grid;
 
-  grid-template-columns:
-    repeat(2, 1fr);
+  grid-template-columns: repeat(2, 1fr);
 
   gap: 8px;
 }
@@ -1336,8 +1506,7 @@ pre {
 
   padding: 9px;
 
-  border:
-    1px solid var(--line);
+  border: 1px solid var(--line);
 
   border-radius: 10px;
 
@@ -1361,10 +1530,8 @@ pre {
 }
 
 @media (max-width: 420px) {
-
   .robot-task-grid {
-    grid-template-columns:
-      1fr;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1383,20 +1550,20 @@ pre {
       1 !important;
   }
 
+
   .eye {
     transition: none;
   }
+
 
   .face-stage.speaking
   .mouth i:first-child {
     animation: none;
   }
 }
-
-
-/* =========================================================
+/* =====================================================
    REALTIME ROBOT CONTROL
-   ========================================================= */
+   ===================================================== */
 
 .realtime-card {
   overflow: hidden;
@@ -1404,42 +1571,22 @@ pre {
 
 .realtime-grid {
   display: grid;
-
-  grid-template-columns:
-    repeat(
-      2,
-      minmax(0, 1fr)
-    );
-
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
 .realtime-grid > div {
-  border:
-    1px solid
-    rgba(255,255,255,.08);
-
-  background:
-    rgba(255,255,255,.035);
-
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.035);
   border-radius: 12px;
-
   padding: 11px 12px;
-
   min-width: 0;
 }
 
 .realtime-grid span {
   display: block;
-
-  color:
-    var(
-      --muted,
-      #8ea0b8
-    );
-
+  color: var(--muted, #8ea0b8);
   font-size: 12px;
-
   margin-bottom: 5px;
 }
 
@@ -1449,26 +1596,9 @@ pre {
 
 .pending-delivery {
   margin-top: 14px;
-
-  border:
-    1px solid
-    rgba(
-      253,
-      176,
-      34,
-      .38
-    );
-
-  background:
-    rgba(
-      253,
-      176,
-      34,
-      .08
-    );
-
+  border: 1px solid rgba(253, 176, 34, .38);
+  background: rgba(253, 176, 34, .08);
   border-radius: 14px;
-
   padding: 13px 14px;
 }
 
@@ -1478,239 +1608,105 @@ pre {
 
 .pending-delivery p {
   margin: 7px 0 0;
-
-  color:
-    var(
-      --muted,
-      #8ea0b8
-    );
-
+  color: var(--muted, #8ea0b8);
   line-height: 1.5;
 }
 
-
-/* =========================================================
-   CAMERA
-
-   QUAN TRỌNG:
-   - contain = nhìn TOÀN BỘ ảnh camera
-   - cover   = phóng ảnh và CẮT MÉP
-
-   Vì vậy tuyệt đối không đổi lại thành cover nếu muốn debug
-   toàn bộ khung hình.
-   ========================================================= */
-
 .camera-stage {
   position: relative;
-
   margin-top: 14px;
-
   border-radius: 16px;
-
   overflow: hidden;
-
   background: #020617;
-
-  /*
-    Đây chỉ là fallback ban đầu.
-    vision.js mới nhất sẽ thay aspect-ratio
-    bằng đúng videoWidth / videoHeight thật của camera.
-  */
   aspect-ratio: 16 / 9;
-
-  border:
-    1px solid
-    rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.08);
 }
 
 .camera-stage video,
 .camera-stage canvas {
   position: absolute;
-
   inset: 0;
-
   width: 100%;
   height: 100%;
-
-  /*
-    HIỂN THỊ TOÀN BỘ ẢNH.
-    Không crop bất kỳ cạnh nào.
-  */
-  object-fit: contain;
-
-  object-position: center;
-}
-
-.camera-stage video {
-  background: #000;
+  object-fit: cover;
 }
 
 .camera-stage canvas {
   pointer-events: none;
-
-  /*
-    Canvas sử dụng cùng cách fit với video
-    để overlay line không bị crop khác camera.
-  */
-  object-fit: contain;
-  object-position: center;
 }
-
-
-/* =========================================================
-   CONTROL ACTIONS
-   ========================================================= */
 
 .control-actions {
   display: grid;
-
-  grid-template-columns:
-    1fr 1fr;
-
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
-
   margin-top: 12px;
 }
 
 .control-button {
   width: 100%;
-
   min-height: 44px;
 }
 
 button.danger {
-  border:
-    1px solid
-    rgba(
-      240,
-      68,
-      56,
-      .45
-    );
-
-  background:
-    rgba(
-      240,
-      68,
-      56,
-      .12
-    );
-
+  border: 1px solid rgba(240, 68, 56, .45);
+  background: rgba(240, 68, 56, .12);
   color: #f97066;
 }
 
 .control-message {
-  margin:
-    12px 0 0;
-
+  margin: 12px 0 0;
   line-height: 1.5;
 }
 
 @media (max-width: 680px) {
-
   .realtime-grid {
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(0, 1fr)
-      );
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .control-actions {
-    grid-template-columns:
-      1fr;
+    grid-template-columns: 1fr;
   }
 }
 
-
-/* =========================================================
-   CAMERA DEBUG
-   ========================================================= */
+/* =====================================================
+   CAMERA DEBUG - chỉ hiển thị khi robot ON TASK
+   ===================================================== */
 
 .camera-debug-button {
   margin-top: 14px;
-
   min-width: 180px;
 }
 
-.camera-debug-button[hidden] {
-  display: none !important;
-}
-
 .camera-debug-panel {
-  width:
-    min(
-      680px,
-      94vw
-    );
-
+  width: min(680px, 94vw);
   margin-top: 14px;
-
   padding: 14px;
-
-  border:
-    1px solid
-    rgba(
-      83,
-      177,
-      253,
-      .30
-    );
-
+  border: 1px solid rgba(83, 177, 253, .30);
   border-radius: 18px;
-
-  background:
-    rgba(
-      2,
-      6,
-      23,
-      .78
-    );
-
-  backdrop-filter:
-    blur(14px);
-
-  /*
-    Không cho panel tự crop nội dung camera.
-  */
-  overflow: visible;
+  background: rgba(2, 6, 23, .78);
+  backdrop-filter: blur(14px);
 }
 
-
-/*
-  Không dùng display:none vì video vẫn cần decode
-  để thuật toán bám line tiếp tục chạy khi panel debug đóng.
-*/
-
+/* Không dùng display:none vì video vẫn phải tiếp tục decode để thuật toán
+   bám line chạy dù người dùng không mở cửa sổ debug. */
 .camera-debug-panel.debug-collapsed {
   position: fixed;
-
   left: -10000px;
   top: 0;
-
   width: 320px;
   height: 180px;
-
   margin: 0;
   padding: 0;
-
   opacity: 0;
-
   pointer-events: none;
-
   overflow: hidden;
 }
 
 .camera-debug-header {
   display: flex;
-
   align-items: flex-start;
-
-  justify-content:
-    space-between;
-
+  justify-content: space-between;
   gap: 12px;
-
   margin-bottom: 10px;
 }
 
@@ -1721,13 +1717,7 @@ button.danger {
 
 .camera-debug-header small {
   margin-top: 4px;
-
-  color:
-    var(
-      --muted,
-      #8ea0b8
-    );
-
+  color: var(--muted, #8ea0b8);
   line-height: 1.4;
 }
 
@@ -1735,255 +1725,402 @@ button.danger {
   flex: 0 0 auto;
 }
 
-
-/* =========================================================
-   VISION DEBUG GRID
-   ========================================================= */
-
 .vision-debug-grid {
   display: grid;
-
-  grid-template-columns:
-    repeat(
-      4,
-      minmax(0, 1fr)
-    );
-
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-
   margin-top: 10px;
 }
 
 .vision-debug-grid > div {
   min-width: 0;
-
   padding: 9px 10px;
-
-  border:
-    1px solid
-    rgba(
-      255,
-      255,
-      255,
-      .08
-    );
-
+  border: 1px solid rgba(255,255,255,.08);
   border-radius: 11px;
-
-  background:
-    rgba(
-      255,
-      255,
-      255,
-      .035
-    );
+  background: rgba(255,255,255,.035);
 }
 
 .vision-debug-grid span {
   display: block;
-
   margin-bottom: 4px;
-
-  color:
-    var(
-      --muted,
-      #8ea0b8
-    );
-
+  color: var(--muted, #8ea0b8);
   font-size: 11px;
 }
 
 .vision-debug-grid b {
   display: block;
-
   overflow-wrap: anywhere;
-
   font-size: 13px;
 }
 
+@media (max-width: 680px) {
+  .camera-debug-panel {
+    width: 100%;
+  }
+
+  .vision-debug-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 /* =========================================================
-   CAMERA DEBUG MOBILE
+   FULL MOBILE PARITY / RESPONSIVE OVERRIDES
+   Mục tiêu:
+   - Mobile hiển thị đầy đủ các thành phần giống desktop.
+   - Không ẩn Trạng thái / Backend / Gemini / HiveMQ / Robot / MQTT WS.
+   - Không ẩn Đăng xuất hay subtitle thương hiệu.
+   - Các grid tự co về 2 cột hoặc 1 cột trên màn hình rất nhỏ.
+   - Camera debug hiển thị toàn bộ khung hình, không crop.
    ========================================================= */
 
-@media (max-width: 680px) {
+/* Camera debug: luôn nhìn toàn bộ ảnh camera. */
+.camera-stage video,
+.camera-stage canvas {
+  object-fit: contain !important;
+  object-position: center !important;
+}
 
-  .camera-debug-button {
+.camera-stage video {
+  background: #000;
+}
+
+/* Mọi nội dung động đều được phép xuống dòng thay vì đẩy tràn card. */
+.status-grid b,
+.route-grid b,
+.realtime-grid b,
+.robot-task-grid b,
+.vision-debug-grid b,
+.robot-presence-meta,
+.control-message,
+.pending-delivery,
+.msg,
+.card,
+.card * {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 820px) {
+
+  /* -------------------------------------------------------
+     TOP BAR: giữ đầy đủ brand + subtitle + Robot select + Logout
+     ------------------------------------------------------- */
+  .topbar {
+    height: auto !important;
+    min-height: 58px;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .brand {
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .brand > div {
+    min-width: 0;
+  }
+
+  .brand b {
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* Không ẩn subtitle trên mobile. */
+  .brand small {
+    display: block !important;
+    margin-top: 2px;
+    font-size: 9px;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 145px;
+  }
+
+  .top-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .top-actions select {
+    min-width: 0;
+    max-width: 105px;
+    padding: 8px 8px;
+    font-size: 12px;
+  }
+
+  /* Không ẩn nút Đăng xuất trên mobile. */
+  .top-actions > .ghost {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 9px;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  /* -------------------------------------------------------
+     MAIN: mobile xếp dọc, nhưng KHÔNG ẩn bất kỳ card chức năng nào
+     ------------------------------------------------------- */
+  .layout {
+    display: block;
     width: 100%;
+    min-width: 0;
+  }
 
+  .face-stage {
+    position: relative;
+    top: auto;
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+    overflow: visible;
+  }
+
+  .panel {
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    gap: 12px;
+  }
+
+  /* QUAN TRỌNG: card Trạng thái trước đây bị ẩn trên mobile. */
+  .panel > .card:first-child {
+    display: block !important;
+  }
+
+  /* Đảm bảo toàn bộ card desktop đều còn trên mobile. */
+  .panel > .card,
+  .panel > details.card {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .card {
+    padding: 14px;
+    border-radius: 15px;
+  }
+
+  .card-title {
+    margin-bottom: 12px;
+    font-size: 14px;
+  }
+
+  /* -------------------------------------------------------
+     STATUS: Backend / Gemini / HiveMQ / Robot / Food / MQTT WS
+     ------------------------------------------------------- */
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .status-grid > div {
+    min-width: 0;
+    padding: 10px;
+  }
+
+  .status-grid span {
+    font-size: 11px;
+  }
+
+  .status-grid b {
+    display: block;
+    min-width: 0;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  #geminiState {
+    font-size: 12px;
+  }
+
+  .robot-presence-meta {
+    width: 100%;
+    margin-top: 9px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  /* -------------------------------------------------------
+     CURRENT TASK / LAST DELIVERY
+     ------------------------------------------------------- */
+  .robot-task-grid,
+  .route-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .robot-task-grid > div,
+  .route-grid > div {
+    min-width: 0;
+  }
+
+  /* -------------------------------------------------------
+     REALTIME CONTROL
+     ------------------------------------------------------- */
+  .realtime-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .realtime-grid > div {
+    min-width: 0;
+    padding: 10px;
+  }
+
+  .control-actions {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  #motionPermissionButton,
+  #stopRobotButton {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  /* -------------------------------------------------------
+     CAMERA DEBUG
+     ------------------------------------------------------- */
+  .camera-debug-button {
+    width: min(100%, 680px);
     min-width: 0;
   }
 
   .camera-debug-panel {
     width: 100%;
-
     max-width: 100%;
-
-    margin-left: 0;
-
-    margin-right: 0;
-
+    min-width: 0;
     padding: 10px;
   }
 
-  /*
-    Camera chiếm hết chiều ngang khả dụng trên mobile.
-  */
   .camera-stage {
     width: 100%;
-
     max-width: 100%;
-
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  .camera-debug-header {
-    gap: 8px;
-  }
-
-  .camera-debug-close {
-    display: inline-flex;
-
-    align-items: center;
-
-    justify-content: center;
-
-    min-height: 38px;
+    background: #000;
   }
 
   .vision-debug-grid {
-    grid-template-columns:
-      repeat(
-        2,
-        minmax(0, 1fr)
-      );
-  }
-}
-
-
-/* =========================================================
-   MOBILE GYRO / CAMERA BUTTON FIX
-   ========================================================= */
-
-#motionPermissionButton {
-  display: block;
-}
-
-@media (max-width: 820px) {
-
-  /*
-    Các nút ghost trong nội dung phải được hiển thị.
-  */
-
-  .panel .ghost,
-  .face-stage .ghost,
-  .camera-debug-panel .ghost {
-    display: inline-flex;
-
-    align-items: center;
-
-    justify-content: center;
-  }
-
-  /*
-    Nút xin quyền Gyro / Camera.
-  */
-
-  #motionPermissionButton {
-    display: flex !important;
-
-    align-items: center;
-
-    justify-content: center;
-
-    width: 100%;
-
-    min-height: 44px;
-  }
-
-  /*
-    Debug camera chỉ hiện khi Javascript
-    bỏ thuộc tính hidden.
-  */
-
-  #cameraDebugButton:not([hidden]) {
-    display: inline-flex !important;
-
-    align-items: center;
-
-    justify-content: center;
-  }
-
-  #cameraDebugButton[hidden] {
-    display: none !important;
-  }
-
-  .camera-debug-close {
-    display: inline-flex !important;
-  }
-}
-
-
-/* =========================================================
-   EXTRA SMALL MOBILE
-   ========================================================= */
-
-@media (max-width: 430px) {
-
-  .realtime-card {
-    padding:
-      14px 12px;
-  }
-
-  .realtime-grid {
-    gap: 8px;
-  }
-
-  .realtime-grid > div {
-    padding:
-      10px 11px;
-  }
-
-  .control-actions {
-    gap: 8px;
-  }
-
-  #motionPermissionButton,
-  #stopRobotButton,
-  #cameraDebugButton {
-    font-size: 13px;
-  }
-
-  .camera-debug-panel {
-    padding: 8px;
-
-    border-radius: 14px;
-  }
-
-  /*
-    Không crop hình trên điện thoại nhỏ.
-  */
-  .camera-stage {
-    width: 100%;
-
-    border-radius: 12px;
-
-    overflow: hidden;
-  }
-
-  .camera-stage video,
-  .camera-stage canvas {
-    object-fit: contain !important;
-
-    object-position: center;
-  }
-
-  .vision-debug-grid {
-    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
   }
 
   .vision-debug-grid > div {
-    padding: 8px;
+    min-width: 0;
+    padding: 8px 9px;
+  }
+
+  /* -------------------------------------------------------
+     TRANSCRIPT + TEXT DEBUG
+     ------------------------------------------------------- */
+  .transcript {
+    width: 100%;
+    max-height: 320px;
+  }
+
+  details.card summary {
+    cursor: pointer;
+  }
+
+  .debug-row {
+    grid-template-columns: 1fr;
+  }
+
+  .debug-row input,
+  .debug-row button {
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+  }
+
+  pre {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* =========================================================
+   PHONE NHỎ: ưu tiên 1 cột để không mất dữ liệu
+   ========================================================= */
+@media (max-width: 380px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 7px 8px;
+    gap: 5px;
+  }
+
+  .brand {
+    gap: 6px;
+  }
+
+  .brand > i {
+    width: 8px;
+    height: 8px;
+  }
+
+  .brand b {
+    font-size: 11px;
+  }
+
+  .brand small {
+    max-width: 120px;
+    font-size: 8px;
+  }
+
+  .top-actions {
+    gap: 4px;
+  }
+
+  .top-actions select {
+    max-width: 88px;
+    padding: 7px 6px;
+    font-size: 11px;
+  }
+
+  .top-actions > .ghost {
+    padding: 7px 6px;
+    font-size: 10px;
+  }
+
+  .status-grid,
+  .realtime-grid,
+  .robot-task-grid,
+  .route-grid,
+  .vision-debug-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    padding: 12px;
+  }
+}
+
+/* =========================================================
+   LANDSCAPE MOBILE / TABLET NHỎ
+   ========================================================= */
+@media (max-width: 820px) and (orientation: landscape) {
+  .status-grid,
+  .realtime-grid,
+  .robot-task-grid,
+  .route-grid,
+  .vision-debug-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panel {
+    padding-left: 12px;
+    padding-right: 12px;
   }
 }
