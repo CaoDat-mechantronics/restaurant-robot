@@ -24,6 +24,8 @@
       this.lastQrScanAt = 0;
       this.qrBusy = false;
       this.barcodeDetector = null;
+      this.displayAspectKey = "";
+      this.lastQr = null;
 
       this.analysisWidth = 320;
       this.darkThreshold =
@@ -102,9 +104,36 @@
       this.video.muted = true;
       await this.video.play();
 
+      // Debug phải hiển thị toàn bộ camera, không crop.
+      // Đồng bộ khung hiển thị với đúng tỷ lệ stream thực tế.
+      this.syncDisplayAspectRatio();
+
       this.running = true;
       this.onDebug("Camera started");
       this.loop();
+    }
+
+    syncDisplayAspectRatio(width = 0, height = 0) {
+      const w = Number(width) || this.video?.videoWidth || 0;
+      const h = Number(height) || this.video?.videoHeight || 0;
+
+      if (!w || !h || !this.video) {
+        return;
+      }
+
+      const key = `${w}x${h}`;
+      if (key === this.displayAspectKey) {
+        return;
+      }
+
+      this.displayAspectKey = key;
+
+      const stage = this.video.closest(".camera-stage") || this.video.parentElement;
+      if (stage) {
+        stage.style.aspectRatio = `${w} / ${h}`;
+      }
+
+      this.onDebug(`Camera frame ${w}x${h}`);
     }
 
     stop() {
@@ -142,6 +171,11 @@
 
       const sourceWidth = this.video.videoWidth || 1280;
       const sourceHeight = this.video.videoHeight || 720;
+
+      // Nếu điện thoại xoay màn hình / stream đổi kích thước,
+      // cập nhật lại tỷ lệ debug để vẫn thấy đủ toàn bộ camera.
+      this.syncDisplayAspectRatio(sourceWidth, sourceHeight);
+
       const width = this.analysisWidth;
       const height = Math.max(180, Math.round(width * sourceHeight / sourceWidth));
 
@@ -332,6 +366,32 @@
         ctx.fill();
       }
 
+      // Vẽ QR gần nhất lên overlay để đo thực nghiệm trực tiếp.
+      const qr = this.lastQr;
+      if (
+        qr?.corners?.length === 4 &&
+        performance.now() - qr.timestamp < 900
+      ) {
+        ctx.strokeStyle = "#f97066";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(qr.corners[0].x, qr.corners[0].y);
+        for (let i = 1; i < qr.corners.length; i++) {
+          ctx.lineTo(qr.corners[i].x, qr.corners[i].y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(2,6,23,.82)";
+        ctx.fillRect(6, 66, 190, 20);
+        ctx.fillStyle = "#f97066";
+        ctx.fillText(
+          `QR: ${qr.areaPercent.toFixed(2)}% · ${Math.round(qr.areaPx)} px²`,
+          12,
+          69
+        );
+      }
+
       // Thông số trực tiếp trên ảnh debug.
       ctx.font = "12px system-ui, sans-serif";
       ctx.textBaseline = "top";
@@ -355,16 +415,118 @@
       );
     }
 
+    polygonArea(points) {
+      if (!Array.isArray(points) || points.length < 3) {
+        return 0;
+      }
+
+      let sum = 0;
+      for (let i = 0; i < points.length; i++) {
+        const a = points[i];
+        const b = points[(i + 1) % points.length];
+        sum += Number(a.x) * Number(b.y) - Number(b.x) * Number(a.y);
+      }
+
+      return Math.abs(sum) / 2;
+    }
+
+    normalizeBarcodeCorners(result) {
+      const raw = Array.isArray(result?.cornerPoints)
+        ? result.cornerPoints
+        : [];
+
+      if (raw.length >= 4) {
+        return raw.slice(0, 4).map((p) => ({
+          x: Number(p.x) || 0,
+          y: Number(p.y) || 0
+        }));
+      }
+
+      const box = result?.boundingBox;
+      if (box) {
+        const x = Number(box.x) || 0;
+        const y = Number(box.y) || 0;
+        const w = Number(box.width) || 0;
+        const h = Number(box.height) || 0;
+
+        return [
+          { x, y },
+          { x: x + w, y },
+          { x: x + w, y: y + h },
+          { x, y: y + h }
+        ];
+      }
+
+      return [];
+    }
+
+    normalizeJsQrCorners(result) {
+      const loc = result?.location;
+      if (!loc) {
+        return [];
+      }
+
+      const raw = [
+        loc.topLeftCorner,
+        loc.topRightCorner,
+        loc.bottomRightCorner,
+        loc.bottomLeftCorner
+      ];
+
+      if (raw.some((p) => !p)) {
+        return [];
+      }
+
+      return raw.map((p) => ({
+        x: Number(p.x) || 0,
+        y: Number(p.y) || 0
+      }));
+    }
+
+    buildQrPayload(text, corners) {
+      const frameWidth = this.canvas.width || 1;
+      const frameHeight = this.canvas.height || 1;
+      const frameArea = frameWidth * frameHeight;
+      const areaPx = this.polygonArea(corners);
+      const areaRatio = frameArea > 0 ? areaPx / frameArea : 0;
+      const areaPercent = areaRatio * 100;
+
+      let centerX = null;
+      let centerY = null;
+
+      if (corners.length) {
+        centerX = corners.reduce((sum, p) => sum + p.x, 0) / corners.length;
+        centerY = corners.reduce((sum, p) => sum + p.y, 0) / corners.length;
+      }
+
+      return {
+        text,
+        corners,
+        areaPx,
+        areaRatio,
+        areaPercent,
+        centerX,
+        centerY,
+        frameWidth,
+        frameHeight,
+        timestamp: performance.now()
+      };
+    }
+
     async scanQr() {
       this.qrBusy = true;
 
       try {
         let text = "";
+        let corners = [];
 
         if (this.barcodeDetector) {
           const results = await this.barcodeDetector.detect(this.canvas);
+
           if (results?.length) {
-            text = String(results[0].rawValue || "").trim();
+            const result = results[0];
+            text = String(result.rawValue || "").trim();
+            corners = this.normalizeBarcodeCorners(result);
           }
         }
         else if (typeof window.jsQR === "function") {
@@ -384,14 +546,14 @@
 
           if (result?.data) {
             text = String(result.data).trim();
+            corners = this.normalizeJsQrCorners(result);
           }
         }
 
         if (text) {
-          this.onQr({
-            text,
-            timestamp: performance.now()
-          });
+          const payload = this.buildQrPayload(text, corners);
+          this.lastQr = payload;
+          this.onQr(payload);
         }
       }
       catch (error) {

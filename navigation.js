@@ -48,6 +48,7 @@
       this.tJunctionHits = 0;
       this.lastTJunctionQrAt = 0;
       this.lastTJunctionHandledAt = 0;
+      this.qrStopPending = false;
     }
 
     start(task) {
@@ -56,6 +57,7 @@
       this.turnDirection = null;
       this.reacquireStableFrames = 0;
       this.tJunctionHits = 0;
+      this.qrStopPending = false;
       this.lastLineSeenAt = performance.now();
 
       this.setState(NAV_STATE.LINE_FOLLOW);
@@ -119,25 +121,48 @@
       }
     }
 
-    handleQr(text) {
+    handleQr(qr) {
       if (this.state !== NAV_STATE.LINE_FOLLOW) {
         return;
       }
+
+      // Tương thích cả kiểu cũ handleQr("T-junction")
+      // và kiểu mới handleQr({ text, areaPercent, areaPx, ... }).
+      const payload =
+        typeof qr === "string"
+          ? { text: qr }
+          : (qr || {});
 
       const expected =
         String(this.config.T_JUNCTION_QR_TEXT || "T-junction")
           .trim()
           .toLowerCase();
 
-      const value = String(text || "").trim().toLowerCase();
+      const value =
+        String(payload.text || "")
+          .trim()
+          .toLowerCase();
+
       if (value !== expected) {
         return;
       }
+
+      const areaPercent = Number(payload.areaPercent);
+      const stopPercent =
+        Math.max(0, Number(this.config.T_JUNCTION_STOP_AREA_PERCENT) || 12);
 
       const now = performance.now();
 
       // Không xử lý lại cùng QR ngay sau khi vừa rẽ xong.
       if (now - this.lastTJunctionHandledAt < 3500) {
+        return;
+      }
+
+      // Chỉ dừng khi QR đã đủ lớn theo ngưỡng đo thực nghiệm.
+      // Nếu detector chưa trả được diện tích hoặc QR còn quá xa, tiếp tục bám line.
+      if (!Number.isFinite(areaPercent) || areaPercent < stopPercent) {
+        this.tJunctionHits = 0;
+        this.qrStopPending = false;
         return;
       }
 
@@ -147,12 +172,18 @@
 
       this.lastTJunctionQrAt = now;
       this.tJunctionHits += 1;
+      this.qrStopPending = true;
+
+      // Vừa đạt ngưỡng là dừng ngay.
+      // Trong lúc chờ đủ số lần xác nhận QR, controlLineFollow() sẽ giữ motor = 0.
+      this.sendMotor(0, 0, true);
 
       const required =
         Math.max(1, Number(this.config.T_JUNCTION_STABLE_COUNT) || 2);
 
       if (this.tJunctionHits >= required) {
         this.tJunctionHits = 0;
+        this.qrStopPending = false;
         this.beginTJunctionTurn();
       }
     }
@@ -230,6 +261,19 @@
     }
 
     controlLineFollow() {
+      // Khi QR T-junction đã đạt ngưỡng diện tích, giữ robot đứng yên
+      // trong lúc chờ đủ số lần xác nhận QR. Nếu mất QR > 1.2 giây,
+      // bỏ trạng thái chờ và tiếp tục bám line.
+      if (this.qrStopPending) {
+        if (performance.now() - this.lastTJunctionQrAt > 1200) {
+          this.qrStopPending = false;
+          this.tJunctionHits = 0;
+        } else {
+          this.sendMotor(0, 0, true);
+          return;
+        }
+      }
+
       // IR2 = biên trái. Chạm biên trái -> ép xe sang phải.
       if (this.sensors.ir2 && !this.sensors.ir3) {
         this.sendMotor(

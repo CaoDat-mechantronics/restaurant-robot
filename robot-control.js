@@ -228,12 +228,38 @@
           : "warn";
       }
     },
-    onQr: ({ text }) => {
+    onQr: (qr) => {
+      const text = String(qr?.text || "");
+      const areaPercent = Number(qr?.areaPercent);
+      const areaPx = Number(qr?.areaPx);
+      const stopPercent =
+        Number(navConfig.T_JUNCTION_STOP_AREA_PERCENT) || 12;
+
       const el = $("qrState");
       if (el) {
-        el.textContent = text;
+        el.textContent = text || "-";
       }
-      navigation?.handleQr(text);
+
+      const debugQr = $("visionQrState");
+      if (debugQr) {
+        debugQr.textContent = text || "-";
+      }
+
+      const areaEl = $("visionQrAreaState");
+      if (areaEl) {
+        if (Number.isFinite(areaPercent) && Number.isFinite(areaPx)) {
+          areaEl.textContent =
+            `${areaPercent.toFixed(2)}% · ${Math.round(areaPx)} px² · dừng ≥ ${stopPercent}%`;
+
+          areaEl.className =
+            areaPercent >= stopPercent ? "good" : "warn";
+        } else {
+          areaEl.textContent = "-";
+          areaEl.className = "muted";
+        }
+      }
+
+      navigation?.handleQr(qr);
     },
     onDebug: log
   });
@@ -297,6 +323,14 @@
     onMotor: ({ left, right }) => {
       if ($("leftMotorState")) $("leftMotorState").textContent = String(left);
       if ($("rightMotorState")) $("rightMotorState").textContent = String(right);
+
+      // Hiển thị luôn lệnh motor trong panel DEBUG CAMERA để đo thực nghiệm.
+      if ($("visionMotorLeftState")) {
+        $("visionMotorLeftState").textContent = String(left);
+      }
+      if ($("visionMotorRightState")) {
+        $("visionMotorRightState").textContent = String(right);
+      }
     },
     onDebug: log
   });

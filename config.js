@@ -1,6 +1,5 @@
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
-  //API_BASE_URL: "http://127.0.0.1:8000",
   DEFAULT_ROBOT: 1,
   GEMINI_WS_BASE: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained",
 
@@ -48,6 +47,11 @@ window.APP_CONFIG = {
     // QR phải thấy ổn định nhiều lần trước khi coi là ngã 3
     T_JUNCTION_QR_TEXT: "T-junction",
     T_JUNCTION_STABLE_COUNT: 2,
+
+    // Ngưỡng dừng theo diện tích QR trong toàn bộ khung hình (%).
+    // Ví dụ 12 nghĩa là QR chiếm >= 12% diện tích frame thì robot dừng.
+    // Hãy đo thực nghiệm bằng ô "QR diện tích" trong DEBUG CAMERA rồi chỉnh giá trị này.
+    T_JUNCTION_STOP_AREA_PERCENT: 12,
 
     // Nếu mất line quá lâu thì dừng robot
     LINE_LOST_STOP_MS: 900,
