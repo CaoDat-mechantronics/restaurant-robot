@@ -58,15 +58,42 @@
       this.overlay = overlayCanvas;
       this.overlayCtx = this.overlay?.getContext("2d") || null;
 
-      const facingMode =
-        this.config.CAMERA_FACING_MODE || "user";
+      // Camera selection:
+      // - Điện thoại / tablet: ưu tiên camera trước.
+      // - Máy tính / laptop: để browser dùng camera mặc định.
+      const isMobileDevice = (() => {
+        const ua = navigator.userAgent || "";
 
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: facingMode },
+        return (
+          /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
+          (
+            navigator.maxTouchPoints > 1 &&
+            /Macintosh/i.test(ua)
+          )
+        );
+      })();
+
+      let videoConstraints;
+
+      if (isMobileDevice) {
+        videoConstraints = {
+          facingMode: { ideal: "user" },
           width: { ideal: 1280 },
           height: { ideal: 720 }
-        },
+        };
+
+        this.onDebug("Mobile -> front camera");
+      } else {
+        videoConstraints = {
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        };
+
+        this.onDebug("Desktop -> default camera");
+      }
+
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
         audio: false
       });
 
@@ -248,12 +275,25 @@
       const ctx = this.overlayCtx;
       ctx.clearRect(0, 0, width, height);
 
+      // ROI mà thuật toán thực sự dùng để tìm hai vạch đen.
       ctx.lineWidth = 2;
-      ctx.strokeStyle = "rgba(255,255,255,.45)";
+      ctx.strokeStyle = "rgba(255,255,255,.55)";
       ctx.strokeRect(0, lane.roiTop, width, lane.roiBottom - lane.roiTop);
+
+      // Tô nhẹ phần hành lang mà frontend tính được giữa hai line.
+      if (lane.hasBothLines) {
+        ctx.fillStyle = "rgba(83,177,253,.10)";
+        ctx.fillRect(
+          lane.leftX,
+          lane.roiTop,
+          Math.max(1, lane.rightX - lane.leftX),
+          lane.roiBottom - lane.roiTop
+        );
+      }
 
       if (lane.leftFound) {
         ctx.strokeStyle = "#32d583";
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(lane.leftX, lane.roiTop);
         ctx.lineTo(lane.leftX, lane.roiBottom);
@@ -262,25 +302,57 @@
 
       if (lane.rightFound) {
         ctx.strokeStyle = "#32d583";
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(lane.rightX, lane.roiTop);
         ctx.lineTo(lane.rightX, lane.roiBottom);
         ctx.stroke();
       }
 
+      // Tâm ảnh / hướng thẳng của điện thoại.
       ctx.strokeStyle = "#fdb022";
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(lane.frameCenter, lane.roiTop);
       ctx.lineTo(lane.frameCenter, lane.roiBottom);
       ctx.stroke();
 
+      // Tâm hành lang do hai line tạo ra.
       if (lane.laneCenter != null) {
         ctx.strokeStyle = "#53b1fd";
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(lane.laneCenter, lane.roiTop);
         ctx.lineTo(lane.laneCenter, lane.roiBottom);
         ctx.stroke();
+
+        ctx.fillStyle = "#53b1fd";
+        ctx.beginPath();
+        ctx.arc(lane.laneCenter, lane.roiBottom - 8, 5, 0, Math.PI * 2);
+        ctx.fill();
       }
+
+      // Thông số trực tiếp trên ảnh debug.
+      ctx.font = "12px system-ui, sans-serif";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(2,6,23,.72)";
+      ctx.fillRect(6, 6, 178, 54);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(
+        `L: ${lane.leftFound ? lane.leftX.toFixed(0) : "-"}  R: ${lane.rightFound ? lane.rightX.toFixed(0) : "-"}`,
+        12,
+        12
+      );
+      ctx.fillText(
+        `Center: ${lane.laneCenter != null ? lane.laneCenter.toFixed(1) : "-"}`,
+        12,
+        28
+      );
+      ctx.fillText(
+        `Error: ${lane.lineError != null ? lane.lineError.toFixed(1) + " px" : "-"}`,
+        12,
+        44
+      );
     }
 
     async scanQr() {

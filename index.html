@@ -173,6 +173,49 @@
 
       </button>
 
+      <!-- CAMERA DEBUG: chỉ cho mở khi robot đang ON TASK -->
+      <button
+        id="cameraDebugButton"
+        class="camera-debug-button ghost"
+        hidden
+        type="button"
+      >
+        DEBUG CAMERA
+      </button>
+
+      <section
+        id="cameraDebugPanel"
+        class="camera-debug-panel debug-collapsed"
+        aria-hidden="true"
+      >
+        <div class="camera-debug-header">
+          <div>
+            <b>Camera · Line Detection</b>
+            <small>Khung xanh: line · vàng: tâm ảnh · xanh dương: tâm đường</small>
+          </div>
+
+          <button
+            id="cameraDebugCloseButton"
+            class="ghost camera-debug-close"
+            type="button"
+          >
+            Đóng
+          </button>
+        </div>
+
+        <div class="camera-stage" id="cameraStage">
+          <video id="robotCamera" autoplay playsinline muted></video>
+          <canvas id="visionOverlay"></canvas>
+        </div>
+
+        <div class="vision-debug-grid">
+          <div><span>Line trái</span><b id="visionLeftState">-</b></div>
+          <div><span>Line phải</span><b id="visionRightState">-</b></div>
+          <div><span>Tâm đường</span><b id="visionCenterState">-</b></div>
+          <div><span>Sai số</span><b id="visionErrorState">-</b></div>
+        </div>
+      </section>
+
     </section>
 
 
@@ -320,11 +363,6 @@
         <div id="pendingDeliveryCard" class="pending-delivery" hidden>
           <b>Đã nhận nhiệm vụ · đang chờ đặt món</b>
           <p id="pendingDeliveryText">-</p>
-        </div>
-
-        <div class="camera-stage" id="cameraStage" hidden>
-          <video id="robotCamera" autoplay playsinline muted></video>
-          <canvas id="visionOverlay"></canvas>
         </div>
 
         <div class="control-actions">

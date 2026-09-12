@@ -16,7 +16,9 @@
     lastSyncedHasFood: null,
     currentDispatch: null,
     orientationPermissionReady: false,
-    cameraPermissionReady: false
+    cameraPermissionReady: false,
+    robotStatus: "disconnected",
+    cameraDebugOpen: false
   };
 
   function token() {
@@ -70,6 +72,68 @@
     el.className = bad
       ? "control-message bad"
       : "muted control-message";
+  }
+
+  function setDebugAvailability(isOnTask) {
+    const button = $("cameraDebugButton");
+    if (button) {
+      button.hidden = !isOnTask;
+      button.disabled = !isOnTask;
+    }
+
+    if (!isOnTask) {
+      closeCameraDebug();
+    }
+  }
+
+  function openCameraDebug() {
+    if (controlState.robotStatus !== "on_task") {
+      setMessage("Debug camera chỉ mở khi robot đang ON TASK.", true);
+      return;
+    }
+
+    const panel = $("cameraDebugPanel");
+    if (!panel) return;
+
+    controlState.cameraDebugOpen = true;
+    panel.classList.remove("debug-collapsed");
+    panel.setAttribute("aria-hidden", "false");
+
+    const button = $("cameraDebugButton");
+    if (button) button.textContent = "ẨN DEBUG CAMERA";
+  }
+
+  function closeCameraDebug() {
+    const panel = $("cameraDebugPanel");
+    controlState.cameraDebugOpen = false;
+
+    if (panel) {
+      panel.classList.add("debug-collapsed");
+      panel.setAttribute("aria-hidden", "true");
+    }
+
+    const button = $("cameraDebugButton");
+    if (button) button.textContent = "DEBUG CAMERA";
+  }
+
+  async function ensureDebugCamera() {
+    if (vision.running) {
+      return true;
+    }
+
+    try {
+      await vision.start(
+        $("robotCamera"),
+        $("visionOverlay")
+      );
+      controlState.cameraPermissionReady = true;
+      return true;
+    }
+    catch (error) {
+      setMessage(`Không mở được camera debug: ${error.message}`, true);
+      log(`DEBUG CAMERA ERROR: ${error.message}`);
+      return false;
+    }
   }
 
   function setMqttUi(state) {
@@ -129,6 +193,40 @@
     config: navConfig,
     onFrame: (frame) => {
       navigation?.updateVision(frame);
+
+      const left = $("visionLeftState");
+      const right = $("visionRightState");
+      const center = $("visionCenterState");
+      const error = $("visionErrorState");
+
+      if (left) {
+        left.textContent = frame?.leftFound
+          ? `x=${Math.round(frame.leftX)} · ${(frame.leftConfidence * 100).toFixed(0)}%`
+          : "Không thấy";
+        left.className = frame?.leftFound ? "good" : "bad";
+      }
+
+      if (right) {
+        right.textContent = frame?.rightFound
+          ? `x=${Math.round(frame.rightX)} · ${(frame.rightConfidence * 100).toFixed(0)}%`
+          : "Không thấy";
+        right.className = frame?.rightFound ? "good" : "bad";
+      }
+
+      if (center) {
+        center.textContent = frame?.laneCenter != null
+          ? `x=${Math.round(frame.laneCenter)}`
+          : "-";
+      }
+
+      if (error) {
+        error.textContent = frame?.lineError != null
+          ? `${frame.lineError >= 0 ? "+" : ""}${frame.lineError.toFixed(1)} px`
+          : "-";
+        error.className = frame?.lineError != null && Math.abs(frame.lineError) < 25
+          ? "good"
+          : "warn";
+      }
     },
     onQr: ({ text }) => {
       const el = $("qrState");
@@ -319,6 +417,8 @@
       await ackPromise;
 
       controlState.currentDispatch = confirmed;
+      controlState.robotStatus = "on_task";
+      setDebugAvailability(true);
       controlState.pendingDelivery = null;
       $("pendingDeliveryCard").hidden = true;
 
@@ -422,9 +522,8 @@
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
 
-    const cameraStage = $("cameraStage");
-    if (cameraStage) cameraStage.hidden = false;
-
+    // Camera luôn chạy để điều hướng, nhưng hình debug chỉ hiện khi
+    // người dùng bấm DEBUG CAMERA trong trạng thái ON TASK.
     await vision.start(
       $("robotCamera"),
       $("visionOverlay")
@@ -445,9 +544,7 @@
     } catch (_) {}
 
     vision.stop();
-
-    const cameraStage = $("cameraStage");
-    if (cameraStage) cameraStage.hidden = true;
+    closeCameraDebug();
 
     setMessage(`Robot đã dừng (${reason}).`);
   }
@@ -460,6 +557,8 @@
     }
 
     controlState.robot = next;
+    controlState.robotStatus = "disconnected";
+    setDebugAvailability(false);
     controlState.pendingDelivery = null;
     controlState.currentDispatch = null;
     controlState.lastSyncedHasFood = null;
@@ -482,6 +581,36 @@
   window.addEventListener("robot:selected", (event) => {
     switchRobot(event.detail?.robot);
   });
+
+  window.addEventListener("robot:status-updated", (event) => {
+    const robot = Number(event.detail?.robot || 0);
+    if (robot !== controlState.robot) {
+      return;
+    }
+
+    const status = String(event.detail?.status || "disconnected").toLowerCase();
+    controlState.robotStatus = status;
+    setDebugAvailability(status === "on_task");
+  });
+
+  $("cameraDebugButton")?.addEventListener("click", async () => {
+    if (controlState.cameraDebugOpen) {
+      closeCameraDebug();
+      return;
+    }
+
+    if (controlState.robotStatus !== "on_task") {
+      setDebugAvailability(false);
+      return;
+    }
+
+    const ok = await ensureDebugCamera();
+    if (ok) {
+      openCameraDebug();
+    }
+  });
+
+  $("cameraDebugCloseButton")?.addEventListener("click", closeCameraDebug);
 
   $("motionPermissionButton")?.addEventListener("click", preparePermissions);
 
@@ -511,6 +640,7 @@
   });
 
   async function boot() {
+    setDebugAvailability(false);
     updateSensorUi();
     setMqttUi("connecting");
 

@@ -1654,3 +1654,98 @@ button.danger {
     grid-template-columns: 1fr;
   }
 }
+
+/* =====================================================
+   CAMERA DEBUG - chỉ hiển thị khi robot ON TASK
+   ===================================================== */
+
+.camera-debug-button {
+  margin-top: 14px;
+  min-width: 180px;
+}
+
+.camera-debug-panel {
+  width: min(680px, 94vw);
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(83, 177, 253, .30);
+  border-radius: 18px;
+  background: rgba(2, 6, 23, .78);
+  backdrop-filter: blur(14px);
+}
+
+/* Không dùng display:none vì video vẫn phải tiếp tục decode để thuật toán
+   bám line chạy dù người dùng không mở cửa sổ debug. */
+.camera-debug-panel.debug-collapsed {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 320px;
+  height: 180px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.camera-debug-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.camera-debug-header b,
+.camera-debug-header small {
+  display: block;
+}
+
+.camera-debug-header small {
+  margin-top: 4px;
+  color: var(--muted, #8ea0b8);
+  line-height: 1.4;
+}
+
+.camera-debug-close {
+  flex: 0 0 auto;
+}
+
+.vision-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.vision-debug-grid > div {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 11px;
+  background: rgba(255,255,255,.035);
+}
+
+.vision-debug-grid span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted, #8ea0b8);
+  font-size: 11px;
+}
+
+.vision-debug-grid b {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+@media (max-width: 680px) {
+  .camera-debug-panel {
+    width: 100%;
+  }
+
+  .vision-debug-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

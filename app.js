@@ -808,6 +808,22 @@
           : "muted";
     }
 
+    // Thông báo cho robot-control.js biết status mới nhất để
+    // bật/tắt nút DEBUG CAMERA.
+    window.dispatchEvent(
+      new CustomEvent(
+        "robot:status-updated",
+        {
+          detail: {
+            robot: state.robot,
+            status,
+            has_food: robot.has_food === true,
+            robotData: robot
+          }
+        }
+      )
+    );
+
     const task =
       robot.tasks;
 
