@@ -74,11 +74,36 @@
       : "muted control-message";
   }
 
+  function updateCameraSwitchButton() {
+    const button = $("cameraSwitchButton");
+    if (!button) return;
+
+    const facingMode = vision?.getFacingMode?.() ||
+      navConfig.CAMERA_FACING_MODE ||
+      "user";
+
+    const usingRearCamera = facingMode === "environment";
+    button.textContent = usingRearCamera ? "CAMERA TRƯỚC" : "CAMERA SAU";
+    button.title = usingRearCamera
+      ? "Chuyển sang camera trước"
+      : "Chuyển sang camera sau";
+  }
+
   function setDebugAvailability(isOnTask) {
-    const button = $("cameraDebugButton");
-    if (button) {
-      button.hidden = !isOnTask;
-      button.disabled = !isOnTask;
+    const debugButton = $("cameraDebugButton");
+    if (debugButton) {
+      debugButton.hidden = !isOnTask;
+      debugButton.disabled = !isOnTask;
+    }
+
+    const switchButton = $("cameraSwitchButton");
+    if (switchButton) {
+      switchButton.hidden = !isOnTask;
+      switchButton.disabled = !isOnTask;
+    }
+
+    if (isOnTask) {
+      updateCameraSwitchButton();
     }
 
     if (!isOnTask) {
@@ -127,6 +152,7 @@
         $("visionOverlay")
       );
       controlState.cameraPermissionReady = true;
+      updateCameraSwitchButton();
       return true;
     }
     catch (error) {
@@ -635,6 +661,7 @@
       $("robotCamera"),
       $("visionOverlay")
     );
+    updateCameraSwitchButton();
 
     navigation.updateSensors(controlState.sensors);
     navigation.start(task);
@@ -718,6 +745,47 @@
   });
 
   $("cameraDebugCloseButton")?.addEventListener("click", closeCameraDebug);
+
+  $("cameraSwitchButton")?.addEventListener("click", async () => {
+    if (controlState.robotStatus !== "on_task") {
+      setMessage("Chỉ đổi camera khi robot đang ON TASK.", true);
+      return;
+    }
+
+    const button = $("cameraSwitchButton");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "ĐANG ĐỔI...";
+    }
+
+    try {
+      if (!vision.running) {
+        const ok = await ensureDebugCamera();
+        if (!ok) return;
+      }
+
+      const facingMode = await vision.switchCamera();
+      controlState.cameraPermissionReady = true;
+      updateCameraSwitchButton();
+
+      const cameraName = facingMode === "environment"
+        ? "camera sau"
+        : "camera trước";
+
+      setMessage(`Đã chuyển sang ${cameraName}.`);
+      log(`CAMERA SWITCH -> ${cameraName}`);
+    }
+    catch (error) {
+      updateCameraSwitchButton();
+      setMessage(`Không đổi được camera: ${error.message}`, true);
+      log(`CAMERA SWITCH ERROR: ${error.message}`);
+    }
+    finally {
+      if (button) {
+        button.disabled = controlState.robotStatus !== "on_task";
+      }
+    }
+  });
 
   $("motionPermissionButton")?.addEventListener("click", preparePermissions);
 

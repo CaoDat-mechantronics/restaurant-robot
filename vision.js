@@ -33,6 +33,16 @@
       this.barcodeDetector = null;
       this.displayAspectKey = "";
 
+      const configuredFacingMode = String(
+        this.config.CAMERA_FACING_MODE || "user"
+      ).toLowerCase();
+
+      this.currentFacingMode = configuredFacingMode === "environment"
+        ? "environment"
+        : "user";
+
+      this.cameraSwitchBusy = false;
+
       this.analysisWidth = Math.max(
         320,
         Number(this.config.VISION_ANALYSIS_WIDTH) || 480
@@ -69,6 +79,47 @@
     // CAMERA
     // =====================================================
 
+    getFacingMode() {
+      return this.currentFacingMode;
+    }
+
+    getVideoConstraints(
+      facingMode = this.currentFacingMode,
+      exactFacingMode = false
+    ) {
+      return {
+        facingMode: exactFacingMode
+          ? { exact: facingMode }
+          : { ideal: facingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      };
+    }
+
+    async requestCameraStream(
+      facingMode = this.currentFacingMode,
+      { exactFacingMode = false } = {}
+    ) {
+      return navigator.mediaDevices.getUserMedia({
+        video: this.getVideoConstraints(facingMode, exactFacingMode),
+        audio: false
+      });
+    }
+
+    async attachCameraStream(stream, facingMode) {
+      this.stream = stream;
+      this.currentFacingMode = facingMode;
+
+      this.video.srcObject = stream;
+      this.video.playsInline = true;
+      this.video.muted = true;
+      await this.video.play();
+
+      this.displayAspectKey = "";
+      this.syncDisplayAspectRatio();
+      this.resetTracking();
+    }
+
     async start(videoElement, overlayCanvas) {
       if (this.running) {
         return;
@@ -82,51 +133,83 @@
       this.overlay = overlayCanvas;
       this.overlayCtx = this.overlay?.getContext("2d") || null;
 
-      const isMobileDevice = (() => {
-        const ua = navigator.userAgent || "";
-
-        return (
-          /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ||
-          (
-            navigator.maxTouchPoints > 1 &&
-            /Macintosh/i.test(ua)
-          )
-        );
-      })();
-
-      let videoConstraints;
-
-      if (isMobileDevice) {
-        videoConstraints = {
-          facingMode: { ideal: "user" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        };
-        this.onDebug("Mobile -> front camera");
-      } else {
-        videoConstraints = {
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        };
-        this.onDebug("Desktop -> default camera");
-      }
-
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraints,
-        audio: false
-      });
-
-      this.video.srcObject = this.stream;
-      this.video.playsInline = true;
-      this.video.muted = true;
-      await this.video.play();
-
-      this.syncDisplayAspectRatio();
-      this.resetTracking();
+      const stream = await this.requestCameraStream(this.currentFacingMode);
+      await this.attachCameraStream(stream, this.currentFacingMode);
 
       this.running = true;
-      this.onDebug("Camera started · Line Detection V2");
+      this.onDebug(
+        `Camera started · ${this.currentFacingMode === "environment" ? "rear" : "front"} · Line Detection V2`
+      );
       this.loop();
+    }
+
+    async switchCamera() {
+      if (this.cameraSwitchBusy) {
+        return this.currentFacingMode;
+      }
+
+      const nextFacingMode = this.currentFacingMode === "user"
+        ? "environment"
+        : "user";
+
+      // Nếu camera chưa chạy, chỉ đổi lựa chọn để lần start() kế tiếp dùng camera mới.
+      if (!this.running || !this.video) {
+        this.currentFacingMode = nextFacingMode;
+        return this.currentFacingMode;
+      }
+
+      this.cameraSwitchBusy = true;
+      const previousFacingMode = this.currentFacingMode;
+
+      try {
+        // iOS/Safari thường đổi camera ổn định hơn nếu nhả camera cũ trước.
+        if (this.stream) {
+          for (const track of this.stream.getTracks()) {
+            track.stop();
+          }
+        }
+
+        this.stream = null;
+        this.video.srcObject = null;
+
+        let stream;
+
+        try {
+          // Khi người dùng chủ động bấm đổi, yêu cầu đúng camera trước/sau.
+          stream = await this.requestCameraStream(nextFacingMode, {
+            exactFacingMode: true
+          });
+        }
+        catch (exactError) {
+          // Một số browser cũ không xử lý exact tốt; thử lại bằng ideal.
+          this.onDebug(`Exact facingMode failed: ${exactError.message}`);
+          stream = await this.requestCameraStream(nextFacingMode);
+        }
+
+        await this.attachCameraStream(stream, nextFacingMode);
+
+        this.onDebug(
+          `Camera switched -> ${nextFacingMode === "environment" ? "rear" : "front"}`
+        );
+
+        return this.currentFacingMode;
+      }
+      catch (error) {
+        // Nếu camera đích không mở được, cố gắng khôi phục camera đang dùng trước đó.
+        try {
+          const fallbackStream = await this.requestCameraStream(previousFacingMode);
+          await this.attachCameraStream(fallbackStream, previousFacingMode);
+          this.onDebug("Camera switch failed -> restored previous camera");
+        }
+        catch (restoreError) {
+          this.onDebug(`Camera restore failed: ${restoreError.message}`);
+        }
+
+        throw error;
+      }
+      finally {
+        this.cameraSwitchBusy = false;
+      }
     }
 
     syncDisplayAspectRatio(width = 0, height = 0) {

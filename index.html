@@ -173,15 +173,27 @@
 
       </button>
 
-      <!-- CAMERA DEBUG: chỉ cho mở khi robot đang ON TASK -->
-      <button
-        id="cameraDebugButton"
-        class="camera-debug-button ghost"
-        hidden
-        type="button"
-      >
-        DEBUG CAMERA
-      </button>
+      <!-- CAMERA: chỉ cho điều khiển khi robot đang ON TASK -->
+      <div class="camera-action-row">
+        <button
+          id="cameraDebugButton"
+          class="camera-debug-button ghost"
+          hidden
+          type="button"
+        >
+          DEBUG CAMERA
+        </button>
+
+        <button
+          id="cameraSwitchButton"
+          class="camera-switch-button ghost"
+          hidden
+          type="button"
+          title="Chuyển sang camera sau"
+        >
+          CAMERA SAU
+        </button>
+      </div>
 
       <section
         id="cameraDebugPanel"
