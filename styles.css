@@ -1548,3 +1548,109 @@ pre {
     animation: none;
   }
 }
+/* =====================================================
+   REALTIME ROBOT CONTROL
+   ===================================================== */
+
+.realtime-card {
+  overflow: hidden;
+}
+
+.realtime-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.realtime-grid > div {
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.035);
+  border-radius: 12px;
+  padding: 11px 12px;
+  min-width: 0;
+}
+
+.realtime-grid span {
+  display: block;
+  color: var(--muted, #8ea0b8);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.realtime-grid b {
+  overflow-wrap: anywhere;
+}
+
+.pending-delivery {
+  margin-top: 14px;
+  border: 1px solid rgba(253, 176, 34, .38);
+  background: rgba(253, 176, 34, .08);
+  border-radius: 14px;
+  padding: 13px 14px;
+}
+
+.pending-delivery b {
+  color: #fdb022;
+}
+
+.pending-delivery p {
+  margin: 7px 0 0;
+  color: var(--muted, #8ea0b8);
+  line-height: 1.5;
+}
+
+.camera-stage {
+  position: relative;
+  margin-top: 14px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #020617;
+  aspect-ratio: 16 / 9;
+  border: 1px solid rgba(255,255,255,.08);
+}
+
+.camera-stage video,
+.camera-stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.camera-stage canvas {
+  pointer-events: none;
+}
+
+.control-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.control-button {
+  width: 100%;
+  min-height: 44px;
+}
+
+button.danger {
+  border: 1px solid rgba(240, 68, 56, .45);
+  background: rgba(240, 68, 56, .12);
+  color: #f97066;
+}
+
+.control-message {
+  margin: 12px 0 0;
+  line-height: 1.5;
+}
+
+@media (max-width: 680px) {
+  .realtime-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-actions {
+    grid-template-columns: 1fr;
+  }
+}

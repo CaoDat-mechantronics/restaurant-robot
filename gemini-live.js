@@ -23,6 +23,9 @@ class GeminiRobotLive {
     this.ready = false;
     this.mic = false;
 
+    // Kết quả check-food gần nhất. prepare_delivery chỉ được tạo từ dữ liệu này.
+    this.lastFoodCheck = null;
+
     this.audio = new RobotAudio({
       onLevel,
       onError: (error) => {
@@ -44,70 +47,34 @@ Luôn trả lời bằng tiếng Việt, ngắn gọn, rõ ràng và lịch sự
 QUY TẮC BẮT BUỘC:
 
 1. Khi người dùng yêu cầu mang/giao món tới một bàn,
-   phải xác định rõ:
-   - tên món
-   - số bàn.
+   phải xác định rõ tên món và số bàn.
 
 2. LUÔN gọi function check_table_food trước khi xác nhận món tồn tại.
 
-3. Tuyệt đối không tự bịa:
-   - item_id
-   - tên món
-   - số bàn
-   - Line
-   - hướng rẽ
-   - trạng thái món.
+3. Tuyệt đối không tự bịa item_id, tên món, số bàn, Line, hướng rẽ, stop_index hoặc trạng thái món.
 
-4. Nếu check_table_food trả found=false:
-   - nói rõ bàn đó không có món được yêu cầu trong các món chưa giao;
-   - nói rằng người quản lý có thể đã nhầm;
-   - nếu tool trả available_foods hoặc suggestions thì có thể gợi ý ngắn gọn;
-   - KHÔNG gọi dispatch_delivery.
+4. Nếu check_table_food trả found=false hoặc deliverable=false:
+   - giải thích ngắn gọn theo đúng tool result;
+   - KHÔNG gọi prepare_delivery.
 
-5. Nếu found=true nhưng deliverable=false:
-   - nói rõ món có trong đơn nhưng chưa thể giao;
-   - giải thích lý do tool trả về;
-   - KHÔNG gọi dispatch_delivery.
+5. Nếu found=true và deliverable=true:
+   - đọc lại tên món, số bàn, Line và hướng rẽ;
+   - hỏi người dùng xác nhận trước khi nhận nhiệm vụ.
 
-6. Nếu found=true và deliverable=true:
-   - đọc lại chính xác tên món;
-   - đọc lại số bàn;
-   - đọc Line;
-   - đọc hướng rẽ ở ngã 3;
-   - tất cả route phải lấy từ tool, không tự suy luận.
+6. CHỈ sau khi người dùng xác nhận rõ ràng như "đồng ý", "xác nhận", "giao đi", "ok"
+   mới gọi prepare_delivery.
 
-7. Sau đó PHẢI hỏi người dùng xác nhận trước khi giao.
+7. prepare_delivery KHÔNG cho robot chạy ngay. Nó chỉ chuyển frontend sang trạng thái:
+   "đã nhận nhiệm vụ - chờ đặt món lên robot".
 
-Ví dụ:
-"Tôi xác nhận mang Pizza đến bàn 7.
-Robot sẽ đi Line 2 và rẽ phải tại ngã 3.
-Anh/chị xác nhận giao món chứ?"
+8. Sau prepare_delivery thành công, nói rõ:
+   - nhiệm vụ đã được nhận;
+   - hãy đặt món lên robot;
+   - robot chỉ bắt đầu dispatch khi cảm biến IR5 báo đã có món.
 
-8. CHỈ sau khi người dùng xác nhận rõ ràng như:
-   - đồng ý
-   - xác nhận
-   - giao đi
-   - thực hiện đi
-   - ok giao đi
+9. Nếu người dùng đổi món hoặc đổi bàn trước khi xác nhận, phải gọi check_table_food lại.
 
-   mới được gọi dispatch_delivery.
-
-9. Nếu người dùng đổi món hoặc đổi bàn trước khi xác nhận,
-   phải gọi check_table_food lại.
-
-10. Route do backend quyết định.
-    Không tự tính, không sửa route.
-
-11. Nếu dispatch_delivery thành công,
-    thông báo lại:
-    - món
-    - bàn
-    - robot
-    - Line
-    - hướng rẽ.
-
-12. Nếu function trả lỗi,
-    không được nói rằng robot đã nhận lệnh.
+10. Route do backend quyết định. Không tự tính hoặc sửa route.
 `;
   }
 
@@ -121,62 +88,40 @@ Anh/chị xác nhận giao món chứ?"
         functionDeclarations: [
           {
             name: "check_table_food",
-
             description:
-              "Kiểm tra trong dữ liệu nhà hàng xem một bàn có món " +
-              "người quản lý yêu cầu hay không. Phải gọi trước khi giao món.",
-
+              "Kiểm tra trong dữ liệu nhà hàng xem một bàn có món người quản lý yêu cầu hay không. Phải gọi trước khi nhận nhiệm vụ giao món.",
             parameters: {
               type: "OBJECT",
-
               properties: {
                 table_number: {
                   type: "INTEGER",
                   description: "Số bàn từ 1 đến 10."
                 },
-
                 food_name: {
                   type: "STRING",
                   description: "Tên món ăn người dùng yêu cầu."
                 }
               },
-
-              required: [
-                "table_number",
-                "food_name"
-              ]
+              required: ["table_number", "food_name"]
             }
           },
-
           {
-            name: "dispatch_delivery",
-
+            name: "prepare_delivery",
             description:
-              "Gửi lệnh giao món tới robot qua backend/HiveMQ. " +
-              "Chỉ gọi sau khi món được check là deliverable=true " +
-              "và người dùng đã xác nhận rõ ràng.",
-
+              "Sau khi người dùng xác nhận, ghi nhận nhiệm vụ giao món ở frontend và chờ IR5 phát hiện món. Tool này không dispatch database và không publish MQTT.",
             parameters: {
               type: "OBJECT",
-
               properties: {
                 item_id: {
                   type: "INTEGER",
-                  description:
-                    "ID món chính xác do check_table_food trả về."
+                  description: "ID món chính xác do check_table_food trả về."
                 },
-
                 table_number: {
                   type: "INTEGER",
-                  description:
-                    "Số bàn chính xác do check_table_food trả về."
+                  description: "Số bàn chính xác do check_table_food trả về."
                 }
               },
-
-              required: [
-                "item_id",
-                "table_number"
-              ]
+              required: ["item_id", "table_number"]
             }
           }
         ]
@@ -649,60 +594,59 @@ Anh/chị xác nhận giao món chứ?"
       name ===
       "check_table_food"
     ) {
-      return await this.authFetch(
+      const result = await this.authFetch(
         "/robot-ai/check-food",
         {
           method: "POST",
-
-          body:
-            JSON.stringify({
-              table_number:
-                Number(
-                  args.table_number
-                ),
-
-              food_name:
-                String(
-                  args.food_name || ""
-                )
-            })
+          body: JSON.stringify({
+            table_number: Number(args.table_number),
+            food_name: String(args.food_name || "")
+          })
         }
       );
+
+      this.lastFoodCheck = result;
+      return result;
     }
 
     if (
       name ===
-      "dispatch_delivery"
+      "prepare_delivery"
     ) {
-      return await this.authFetch(
-        "/robot-ai/dispatch",
-        {
-          method: "POST",
+      const checked = this.lastFoodCheck;
 
-          body:
-            JSON.stringify({
-              item_id:
-                Number(
-                  args.item_id
-                ),
+      if (!checked?.found || !checked?.deliverable || !checked?.item) {
+        throw new Error(
+          "Chưa có kết quả check_table_food hợp lệ để nhận nhiệm vụ."
+        );
+      }
 
-              table_number:
-                Number(
-                  args.table_number
-                ),
+      const itemId = Number(args.item_id);
+      const tableNumber = Number(args.table_number);
+      const checkedItemId = Number(checked.item.id);
+      const checkedTable = Number(checked.table_number);
 
-              robot:
-                Number(
-                  this.getRobotNumber()
-                )
-            })
-        }
-      );
+      if (itemId !== checkedItemId || tableNumber !== checkedTable) {
+        throw new Error(
+          "item_id hoặc table_number không khớp kết quả check_table_food gần nhất."
+        );
+      }
+
+      return {
+        success: true,
+        accepted: true,
+        waiting_for_food: true,
+        item_id: checkedItemId,
+        table_number: checkedTable,
+        table: checkedTable,
+        food_name: checked.item.food_name,
+        route: checked.route,
+        message: "Đã nhận nhiệm vụ. Đang chờ IR5 xác nhận món đã được đặt lên robot."
+      };
     }
 
     throw new Error(
-      "Unknown Gemini tool: " +
-      name
+      "Unknown Gemini tool: " + name
     );
   }
 

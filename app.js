@@ -534,26 +534,36 @@
     }
 
     // ===============================================
-    // DISPATCH
+    // PREPARE DELIVERY
+    // Gemini chỉ nhận nhiệm vụ. Chưa dispatch database/MQTT.
+    // RobotControl sẽ chờ IR5 = true rồi mới thực hiện dispatch.
     // ===============================================
 
     if (
       name ===
-      "dispatch_delivery"
+      "prepare_delivery"
     ) {
-      const turn =
-        result.route
-          ?.junction_turn_vi ||
-        result.route
-          ?.junction_turn ||
-        "";
+      if (result?.accepted) {
+        const turn =
+          result.route
+            ?.junction_turn_vi ||
+          result.route
+            ?.junction_turn ||
+          "";
 
-      $("assistantText")
-        .textContent =
-        `Đã gửi ${result.food_name} ` +
-        `tới bàn ${result.table}. ` +
-        `Line ${result.route?.line ?? "-"} ` +
-        `${turn}.`;
+        $("assistantText")
+          .textContent =
+          `Đã nhận nhiệm vụ ${result.food_name} tới bàn ${result.table}. ` +
+          `Line ${result.route?.line ?? "-"} ${turn}. ` +
+          `Hãy đặt món lên robot.`;
+
+        window.dispatchEvent(
+          new CustomEvent(
+            "robot:prepare-delivery",
+            { detail: result }
+          )
+        );
+      }
     }
   }
 
@@ -684,6 +694,10 @@
       return "ON TASK";
     }
 
+    if (value === "come_back") {
+      return "COME BACK";
+    }
+
     return "DISCONNECTED";
   }
 
@@ -696,7 +710,7 @@
       return "good";
     }
 
-    if (value === "on_task") {
+    if (value === "on_task" || value === "come_back") {
       return "warn";
     }
 
@@ -781,6 +795,18 @@
     $("robotPresenceMeta")
       .textContent =
       meta.join(" · ");
+
+    const foodState = $("robotFoodState");
+    if (foodState) {
+      foodState.textContent =
+        robot.has_food === true
+          ? "CÓ MÓN"
+          : "KHÔNG CÓ MÓN";
+      foodState.className =
+        robot.has_food === true
+          ? "good"
+          : "muted";
+    }
 
     const task =
       robot.tasks;
@@ -1193,6 +1219,13 @@
 
         log(
           `SELECT Robot ${state.robot}`
+        );
+
+        window.dispatchEvent(
+          new CustomEvent(
+            "robot:selected",
+            { detail: { robot: state.robot } }
+          )
         );
       }
     );

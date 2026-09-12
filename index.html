@@ -213,6 +213,20 @@
             </b>
           </div>
 
+          <div>
+            <span>Món trên robot</span>
+            <b id="robotFoodState" class="muted">
+              ...
+            </b>
+          </div>
+
+          <div>
+            <span>MQTT WebSocket</span>
+            <b id="mqttWsState" class="muted">
+              ...
+            </b>
+          </div>
+
         </div>
 
         <div
@@ -257,6 +271,74 @@
             </div>
           </div>
         </div>
+
+      </section>
+
+
+      <!-- REALTIME ROBOT CONTROL -->
+      <section class="card realtime-card">
+
+        <div class="card-title">
+          Điều khiển realtime
+        </div>
+
+        <div class="realtime-grid">
+          <div>
+            <span>Trạng thái điều hướng</span>
+            <b id="navState">IDLE</b>
+          </div>
+          <div>
+            <span>IR2 · trái</span>
+            <b id="ir2State">0</b>
+          </div>
+          <div>
+            <span>IR3 · phải</span>
+            <b id="ir3State">0</b>
+          </div>
+          <div>
+            <span>IR5 · món</span>
+            <b id="ir5State">0</b>
+          </div>
+          <div>
+            <span>QR</span>
+            <b id="qrState">-</b>
+          </div>
+          <div>
+            <span>Yaw</span>
+            <b id="yawState">-</b>
+          </div>
+          <div>
+            <span>Motor trái</span>
+            <b id="leftMotorState">0</b>
+          </div>
+          <div>
+            <span>Motor phải</span>
+            <b id="rightMotorState">0</b>
+          </div>
+        </div>
+
+        <div id="pendingDeliveryCard" class="pending-delivery" hidden>
+          <b>Đã nhận nhiệm vụ · đang chờ đặt món</b>
+          <p id="pendingDeliveryText">-</p>
+        </div>
+
+        <div class="camera-stage" id="cameraStage" hidden>
+          <video id="robotCamera" autoplay playsinline muted></video>
+          <canvas id="visionOverlay"></canvas>
+        </div>
+
+        <div class="control-actions">
+          <button id="motionPermissionButton" class="ghost control-button">
+            Cho phép Gyro/Camera
+          </button>
+          <button id="stopRobotButton" class="danger control-button">
+            DỪNG ROBOT
+          </button>
+        </div>
+
+        <p id="controlMessage" class="muted control-message">
+          Frontend sẽ chờ IR5 rồi dispatch và điều khiển qua HiveMQ WebSocket.
+        </p>
 
       </section>
 
@@ -451,9 +533,19 @@
      JAVASCRIPT
      ===================================================== -->
 <script src="config.js"></script>
+
+<!-- MQTT over WebSocket + QR fallback -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
 <script src="audio.js"></script>
 <script src="gemini-live.js"></script>
+<script src="mqtt-robot.js"></script>
+<script src="orientation.js"></script>
+<script src="vision.js"></script>
+<script src="navigation.js"></script>
 <script src="app.js"></script>
+<script src="robot-control.js"></script>
 
 </body>
 </html>
