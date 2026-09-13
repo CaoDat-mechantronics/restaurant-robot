@@ -104,9 +104,28 @@ window.APP_CONFIG = {
     MAX_SPEED: 190,
     MIN_CURVE_SPEED: 68,
 
-    // lateralError(px) + headingError(deg)
-    LINE_KP: 0.24,
-    LINE_KH: 1.15,
+    // CENTER-LOCK PID:
+    // lineError(px) = tâm center curve xanh dương - tâm camera.
+    // Kp kéo xe về tâm, Ki bù lệch cơ khí 2 động cơ,
+    // Kd hãm dao động; heading/look-ahead giúp bắt cua sớm.
+    LINE_KP: 0.26,
+    LINE_KI: 0.028,
+    LINE_KD: 0.032,
+    LINE_KH: 1.05,
+    LINE_LOOKAHEAD_KP: 0.055,
+
+    // Sai số <= vùng này được coi là đã nằm trên center line.
+    CENTER_DEADBAND_PX: 4,
+
+    // Anti-windup và lọc đạo hàm của PID.
+    LINE_INTEGRAL_LIMIT: 120,
+    LINE_DERIVATIVE_EMA_ALPHA: 0.22,
+
+    // Không cho correction lái vượt quá mức này (đơn vị PWM).
+    MAX_STEERING_CORRECTION: 92,
+
+    // Nếu lệch tâm tới tỷ lệ này của bề rộng frame thì giảm về MIN_CURVE_SPEED.
+    CENTER_FULL_SLOWDOWN_RATIO: 0.26,
 
     // Khi heading lớn, tự giảm BASE_SPEED để vào cua ổn định hơn.
     CURVE_FULL_SLOWDOWN_DEG: 28,

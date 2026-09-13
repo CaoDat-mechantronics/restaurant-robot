@@ -43,6 +43,12 @@
       this.lastMotor = { left: 0, right: 0 };
       this.controlTimer = null;
 
+      // PID "center-lock": giữ tâm camera trùng với center curve màu xanh dương.
+      this.lineIntegral = 0;
+      this.prevLineError = null;
+      this.prevLineErrorAt = 0;
+      this.filteredLineDerivative = 0;
+
       this.turnStartYaw = null;
       this.turnDirection = null;
       this.reacquireStableFrames = 0;
@@ -67,6 +73,7 @@
       this.lastVision = null;
       this.lastLineSeenAt = performance.now();
       this.lastMotor = { left: 0, right: 0 };
+      this.resetLineController();
 
       this.setState(NAV_STATE.LINE_FOLLOW);
 
@@ -134,6 +141,13 @@
       if (frame?.hasLane) {
         this.lastLineSeenAt = performance.now();
       }
+    }
+
+    resetLineController() {
+      this.lineIntegral = 0;
+      this.prevLineError = null;
+      this.prevLineErrorAt = 0;
+      this.filteredLineDerivative = 0;
     }
 
     // =====================================================
@@ -237,6 +251,7 @@
       this.turnDirection = direction;
       this.turnStartYaw = yaw;
       this.lastTJunctionHandledAt = performance.now();
+      this.resetLineController();
 
       this.setState(
         NAV_STATE.T_JUNCTION_DETECTED,
@@ -293,6 +308,7 @@
           this.qrStopPending = false;
           this.tJunctionHits = 0;
         } else {
+          this.resetLineController();
           this.sendMotor(0, 0, true);
           return;
         }
@@ -300,6 +316,7 @@
 
       // IR2 = biên trái. Chạm trái -> ép sang phải.
       if (this.sensors.ir2 && !this.sensors.ir3) {
+        this.resetLineController();
         this.sendMotor(
           Number(this.config.BORDER_FAST_SPEED) || 145,
           Number(this.config.BORDER_SLOW_SPEED) || 65,
@@ -310,6 +327,7 @@
 
       // IR3 = biên phải. Chạm phải -> ép sang trái.
       if (this.sensors.ir3 && !this.sensors.ir2) {
+        this.resetLineController();
         this.sendMotor(
           Number(this.config.BORDER_SLOW_SPEED) || 65,
           Number(this.config.BORDER_FAST_SPEED) || 145,
@@ -327,12 +345,14 @@
       ) {
         const lostFor = performance.now() - this.lastLineSeenAt;
 
+        this.resetLineController();
+
         if (lostFor >= (Number(this.config.LINE_LOST_STOP_MS) || 850)) {
           this.sendMotor(0, 0, true);
         }
 
         // Không publish lệnh mới khi vision chưa đáng tin.
-        // Motor watchdog phía ESP32 sẽ dừng xe nếu MQTT motor bị mất.
+        // Motor watchdog phía ESP32 nên dừng xe nếu MQTT motor bị mất.
         return;
       }
 
@@ -355,6 +375,7 @@
       );
 
       if (confidence < minConfidence) {
+        this.resetLineController();
         return;
       }
 
@@ -366,13 +387,19 @@
 
       const maxSpeed = Number(this.config.MAX_SPEED) || 190;
       const kp = Number(this.config.LINE_KP) || 0.24;
+      const ki = Number(this.config.LINE_KI) || 0;
+      const kd = Number(this.config.LINE_KD) || 0;
       const kh = Number(this.config.LINE_KH) || 1.15;
+      const lookAheadKp = Number(this.config.LINE_LOOKAHEAD_KP) || 0;
 
+      const lineError = Number(frame.lineError) || 0;
       const heading = Number(frame.headingErrorDeg) || 0;
       const curvature = Number(frame.curvatureDeg) || 0;
+      const frameWidth = Math.max(1, Number(frame.width) || 1);
 
-      // Heading phản ánh hướng đường phía trước; curvature giúp giảm tốc
-      // thêm ở cua gắt, kể cả khi robot hiện vẫn đang gần tâm.
+      // ---------------------------------------------------
+      // 1) Giảm tốc khi vào cua hoặc khi tâm camera lệch xa center curve.
+      // ---------------------------------------------------
       const curveMeasure = Math.max(
         Math.abs(heading),
         Math.abs(curvature) * 0.65
@@ -393,6 +420,23 @@
         configuredBase -
         curveRatio * (configuredBase - minCurveSpeed);
 
+      const centerFullSlowdownRatio = this.clamp(
+        Number(this.config.CENTER_FULL_SLOWDOWN_RATIO) || 0.28,
+        0.08,
+        0.49
+      );
+
+      const offCenterRatio = this.clamp(
+        Math.abs(lineError) / (frameWidth * centerFullSlowdownRatio),
+        0,
+        1
+      );
+
+      baseSpeed = Math.max(
+        minCurveSpeed,
+        baseSpeed - offCenterRatio * (baseSpeed - minCurveSpeed)
+      );
+
       // Khi confidence trung bình, giảm tốc để vision có thời gian ổn định.
       if (confidence < slowConfidence) {
         const confidenceRatio = this.clamp(
@@ -409,9 +453,92 @@
         );
       }
 
-      const correction =
-        frame.lineError * kp +
-        heading * kh;
+      // ---------------------------------------------------
+      // 2) PID CENTER-LOCK.
+      // lineError = center xanh dương tại nearY - tâm camera.
+      // > 0: center nằm bên phải -> bánh trái nhanh hơn để quay phải.
+      // < 0: center nằm bên trái  -> bánh phải nhanh hơn để quay trái.
+      // ---------------------------------------------------
+      const deadbandPx = Math.max(
+        0,
+        Number(this.config.CENTER_DEADBAND_PX) || 0
+      );
+
+      const effectiveError =
+        Math.abs(lineError) <= deadbandPx ? 0 : lineError;
+
+      const now = performance.now();
+      let dt = this.prevLineErrorAt > 0
+        ? (now - this.prevLineErrorAt) / 1000
+        : (Number(this.config.MOTOR_INTERVAL_MS) || 70) / 1000;
+
+      dt = this.clamp(dt, 0.02, 0.20);
+
+      const integralLimit = Math.max(
+        0,
+        Number(this.config.LINE_INTEGRAL_LIMIT) || 0
+      );
+
+      if (effectiveError === 0) {
+        // Khi đã gần tâm, xả tích phân để tránh overshoot qua lại.
+        this.lineIntegral *= 0.78;
+      } else {
+        this.lineIntegral += effectiveError * dt;
+        if (integralLimit > 0) {
+          this.lineIntegral = this.clamp(
+            this.lineIntegral,
+            -integralLimit,
+            integralLimit
+          );
+        }
+      }
+
+      let rawDerivative = 0;
+      if (this.prevLineError != null) {
+        rawDerivative = (effectiveError - this.prevLineError) / dt;
+      }
+
+      const derivativeAlpha = this.clamp(
+        Number(this.config.LINE_DERIVATIVE_EMA_ALPHA) || 0.25,
+        0.05,
+        1
+      );
+
+      this.filteredLineDerivative +=
+        derivativeAlpha *
+        (rawDerivative - this.filteredLineDerivative);
+
+      this.prevLineError = effectiveError;
+      this.prevLineErrorAt = now;
+
+      const lookAheadError =
+        frame.lookAheadCenter != null && frame.frameCenter != null
+          ? Number(frame.lookAheadCenter) - Number(frame.frameCenter)
+          : 0;
+
+      const pTerm = kp * effectiveError;
+      const iTerm = ki * this.lineIntegral;
+      const dTerm = kd * this.filteredLineDerivative;
+      const headingTerm = kh * heading;
+      const lookAheadTerm = lookAheadKp * lookAheadError;
+
+      let correction =
+        pTerm +
+        iTerm +
+        dTerm +
+        headingTerm +
+        lookAheadTerm;
+
+      const maxCorrection = Math.max(
+        10,
+        Number(this.config.MAX_STEERING_CORRECTION) || 90
+      );
+
+      correction = this.clamp(
+        correction,
+        -maxCorrection,
+        maxCorrection
+      );
 
       const leftTarget = this.clamp(
         baseSpeed + correction,
@@ -564,6 +691,7 @@
         this.turnStartYaw = null;
         this.turnDirection = null;
         this.reacquireStableFrames = 0;
+        this.resetLineController();
         this.setState(NAV_STATE.LINE_FOLLOW, "Đã ổn định line mới");
       }
     }
