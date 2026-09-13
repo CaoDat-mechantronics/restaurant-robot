@@ -83,6 +83,21 @@ window.APP_CONFIG = {
     // EMA coefficient của đường cong trái/phải giữa các frame.
     VISION_CURVE_EMA_ALPHA: 0.30,
 
+    // ONE-LINE TRACKING:
+    // laneWidthModel chỉ được học khi nhìn thấy đủ hai vạch thật.
+    VISION_LANE_WIDTH_MODEL_ALPHA: 0.16,
+
+    // Confidence của frame chỉ thấy 1 vạch sẽ bị nhân hệ số này.
+    VISION_ONE_LINE_CONFIDENCE_SCALE: 0.82,
+
+    // Cho phép chạy tối đa khoảng 45 frame (~1.8 s ở 25 FPS) chỉ với 1 vạch.
+    // Quá thời gian này phải bắt lại đủ 2 vạch, nếu không coi là mất line.
+    VISION_ONE_LINE_MAX_FRAMES: 45,
+
+    // Nếu mất cả hai vạch, giữ quỹ đạo cũ tối đa vài frame để tránh giật.
+    VISION_LOST_PREDICT_FRAMES: 4,
+    VISION_LOST_PREDICT_CONFIDENCE: 0.56,
+
     // Tâm điều khiển được lọc riêng để xe không giật trái/phải liên tục.
     VISION_CENTER_EMA_ALPHA: 0.20,
     VISION_MAX_CENTER_JUMP_PX: 26,
@@ -127,6 +142,15 @@ window.APP_CONFIG = {
     // Nếu lệch tâm tới tỷ lệ này của bề rộng frame thì giảm về MIN_CURVE_SPEED.
     CENTER_FULL_SLOWDOWN_RATIO: 0.26,
 
+    // Khi chỉ còn 1 vạch: center xanh được suy ra từ vạch thật + laneWidthModel.
+    // Giảm tốc mạnh nhưng vẫn giữ khả năng ôm cua.
+    ONE_LINE_BASE_SPEED: 76,
+    ONE_LINE_STEERING_GAIN: 1.08,
+
+    // Khi mất cả hai vạch nhưng vẫn còn prediction 3-4 frame: bò rất chậm.
+    LOST_PREDICT_SPEED: 52,
+    LOST_PREDICT_STEERING_GAIN: 0.82,
+
     // Khi heading lớn, tự giảm BASE_SPEED để vào cua ổn định hơn.
     CURVE_FULL_SLOWDOWN_DEG: 28,
 
@@ -157,7 +181,7 @@ window.APP_CONFIG = {
     T_JUNCTION_STOP_AREA_PERCENT: 12,
 
     // Nếu mất lane quá lâu thì dừng robot.
-    LINE_LOST_STOP_MS: 850,
+    LINE_LOST_STOP_MS: 650,
 
     // Tần số gửi lệnh motor lên HiveMQ.
     MOTOR_INTERVAL_MS: 70

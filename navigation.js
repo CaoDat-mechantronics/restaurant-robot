@@ -138,7 +138,10 @@
     updateVision(frame) {
       this.lastVision = frame;
 
-      if (frame?.hasLane) {
+      // Chỉ reset timeout khi camera THẬT SỰ nhìn thấy ít nhất một vạch.
+      // PREDICTED chỉ là hình học giữ lại vài frame nên không được phép
+      // kéo dài vô hạn thời gian "line còn sống".
+      if (frame?.hasVisualLine && frame?.hasLane) {
         this.lastLineSeenAt = performance.now();
       }
     }
@@ -374,6 +377,12 @@
         0.98
       );
 
+      const trackMode = String(frame.trackMode || "TWO_LINES");
+      const oneLineMode =
+        trackMode === "LEFT_ONLY" ||
+        trackMode === "RIGHT_ONLY";
+      const predictedMode = trackMode === "PREDICTED";
+
       if (confidence < minConfidence) {
         this.resetLineController();
         return;
@@ -453,6 +462,28 @@
         );
       }
 
+      // ONE_LINE: center màu xanh là center ước lượng từ 1 biên + laneWidthModel.
+      // Luôn giảm tốc để chừa thời gian cho camera bắt lại biên còn thiếu.
+      if (oneLineMode) {
+        const oneLineSpeed = Math.max(
+          35,
+          Number(this.config.ONE_LINE_BASE_SPEED) || 76
+        );
+
+        baseSpeed = Math.min(baseSpeed, oneLineSpeed);
+      }
+
+      // PREDICTED: không còn nhìn thấy vạch thật, chỉ giữ hình học cũ vài frame.
+      // Chỉ bò chậm; hết số frame prediction thì vision trả LOST_LINE và dừng.
+      if (predictedMode) {
+        const predictedSpeed = Math.max(
+          25,
+          Number(this.config.LOST_PREDICT_SPEED) || 52
+        );
+
+        baseSpeed = Math.min(baseSpeed, predictedSpeed);
+      }
+
       // ---------------------------------------------------
       // 2) PID CENTER-LOCK.
       // lineError = center xanh dương tại nearY - tâm camera.
@@ -528,6 +559,22 @@
         dTerm +
         headingTerm +
         lookAheadTerm;
+
+      if (oneLineMode) {
+        correction *= this.clamp(
+          Number(this.config.ONE_LINE_STEERING_GAIN) || 1.08,
+          0.75,
+          1.40
+        );
+      }
+
+      if (predictedMode) {
+        correction *= this.clamp(
+          Number(this.config.LOST_PREDICT_STEERING_GAIN) || 0.82,
+          0.35,
+          1.00
+        );
+      }
 
       const maxCorrection = Math.max(
         10,

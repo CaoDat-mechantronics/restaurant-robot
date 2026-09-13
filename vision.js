@@ -59,6 +59,13 @@
       this.prevControlCenter = null;
       this.prevLookAheadCenter = null;
       this.prevLaneWidthNear = null;
+
+      // Mô hình bề rộng làn được học CHỈ từ frame thật sự thấy đủ 2 biên.
+      // Khi mất 1 biên, detector chỉ đọc model này để dựng biên ảo,
+      // tuyệt đối không học ngược từ chính biên ảo để tránh drift qua nhiều frame.
+      this.prevLaneWidthCurve = null;
+      this.oneLineFrames = 0;
+      this.unobservedFrames = 0;
       this.lostFrames = 0;
 
       if (
@@ -268,6 +275,9 @@
       this.prevControlCenter = null;
       this.prevLookAheadCenter = null;
       this.prevLaneWidthNear = null;
+      this.prevLaneWidthCurve = null;
+      this.oneLineFrames = 0;
+      this.unobservedFrames = 0;
       this.lostFrames = 0;
       this.lastFrame = null;
     }
@@ -1105,7 +1115,10 @@
 
         let expectedWidth = null;
 
-        if (this.prevLeftCurve && this.prevRightCurve) {
+        if (this.prevLaneWidthCurve) {
+          expectedWidth = this.evalCurve(this.prevLaneWidthCurve, t);
+        }
+        else if (this.prevLeftCurve && this.prevRightCurve) {
           expectedWidth =
             this.evalCurve(this.prevRightCurve, t) -
             this.evalCurve(this.prevLeftCurve, t);
@@ -1145,7 +1158,7 @@
           continue;
         }
 
-        const left = this.chooseSingle(
+        let left = this.chooseSingle(
           candidates,
           expectedLeft,
           margin,
@@ -1153,13 +1166,46 @@
           width
         );
 
-        const right = this.chooseSingle(
+        let right = this.chooseSingle(
           candidates,
           expectedRight,
           margin,
           "right",
           width
         );
+
+        // Một vạch đen duy nhất có thể lọt vào cả cửa sổ LEFT lẫn RIGHT.
+        // Không được dùng cùng một dark-run làm cả hai biên vì laneWidth sẽ ~0.
+        if (left && right) {
+          const sameRunDistance = Math.max(
+            7,
+            ((Number(left.width) || 0) + (Number(right.width) || 0)) / 2 + 3
+          );
+
+          if (Math.abs(left.x - right.x) <= sameRunDistance) {
+            const leftDistance = Number.isFinite(expectedLeft)
+              ? Math.abs(left.x - expectedLeft)
+              : Infinity;
+
+            const rightDistance = Number.isFinite(expectedRight)
+              ? Math.abs(right.x - expectedRight)
+              : Infinity;
+
+            if (Number.isFinite(leftDistance) || Number.isFinite(rightDistance)) {
+              if (leftDistance <= rightDistance) {
+                right = null;
+              } else {
+                left = null;
+              }
+            }
+            else if (left.x <= width / 2) {
+              right = null;
+            }
+            else {
+              left = null;
+            }
+          }
+        }
 
         if (left) {
           leftPoints.push({
@@ -1200,50 +1246,54 @@
         (rightFit?.points?.length || 0) >= minPoints;
 
       const hasBothLines = leftFound && rightFound;
+      const hasAnyObservedLine = leftFound || rightFound;
 
       let leftInferred = false;
       let rightInferred = false;
+      let predictedFromHistory = false;
 
-      // Nếu mất tạm một bên, dùng width model frame trước để giữ robot ổn định
-      // trong vài frame. Confidence sẽ bị giảm nên navigation tự giảm tốc.
-      if (
-        leftFound &&
-        !rightFound &&
-        this.prevLeftCurve &&
-        this.prevRightCurve
-      ) {
-        const previousWidthCurve = this.subtractCurves(
-          this.prevRightCurve,
-          this.prevLeftCurve
-        );
+      // ONE-LINE MODE:
+      // Chỉ dùng width model đã học từ các frame TWO_LINES trước đó.
+      // Không dùng width sinh ra từ frame one-line hiện tại để tránh drift.
+      const widthModel = this.prevLaneWidthCurve;
 
+      if (leftFound && !rightFound && widthModel) {
         rawRightCurve = this.addCurves(
           rawLeftCurve,
-          previousWidthCurve,
+          widthModel,
           1
         );
 
         rightInferred = Boolean(rawRightCurve);
       }
 
-      if (
-        rightFound &&
-        !leftFound &&
-        this.prevLeftCurve &&
-        this.prevRightCurve
-      ) {
-        const previousWidthCurve = this.subtractCurves(
-          this.prevRightCurve,
-          this.prevLeftCurve
-        );
-
+      if (rightFound && !leftFound && widthModel) {
         rawLeftCurve = this.addCurves(
           rawRightCurve,
-          previousWidthCurve,
+          widthModel,
           -1
         );
 
         leftInferred = Boolean(rawLeftCurve);
+      }
+
+      // LOST-LINE ngắn hạn: giữ hình học gần nhất chỉ vài frame để xe không
+      // giật dừng đúng lúc camera bị che/mờ. Navigation sẽ ép tốc độ rất thấp.
+      const predictFrames = Math.max(
+        0,
+        Number(this.config.VISION_LOST_PREDICT_FRAMES) || 0
+      );
+
+      if (
+        !rawLeftCurve &&
+        !rawRightCurve &&
+        this.prevLeftCurve &&
+        this.prevRightCurve &&
+        this.unobservedFrames < predictFrames
+      ) {
+        rawLeftCurve = { ...this.prevLeftCurve };
+        rawRightCurve = { ...this.prevRightCurve };
+        predictedFromHistory = true;
       }
 
       const rawUsable = Boolean(rawLeftCurve && rawRightCurve);
@@ -1362,19 +1412,60 @@
           : this.clamp(maxJump / jump, 0.15, 1);
       }
 
-      let laneConfidence = rawUsable
-        ? this.clamp(
-            ((leftConfidence + rightConfidence) / 2) * 0.40 +
-            pairCoverage * 0.24 +
-            widthConfidence * 0.21 +
-            temporalConfidence * 0.15,
-            0,
-            1
-          )
-        : 0;
+      let laneConfidence = 0;
 
-      if (leftInferred || rightInferred) {
-        laneConfidence *= 0.62;
+      if (rawUsable && hasBothLines) {
+        laneConfidence = this.clamp(
+          ((leftConfidence + rightConfidence) / 2) * 0.40 +
+          pairCoverage * 0.24 +
+          widthConfidence * 0.21 +
+          temporalConfidence * 0.15,
+          0,
+          1
+        );
+      }
+      else if (rawUsable && (leftInferred || rightInferred)) {
+        // Một biên thật + một biên ảo: confidence chủ yếu đến từ biên thật,
+        // width model và tính liên tục theo thời gian. Không phạt như cách cũ
+        // vì như vậy thường tụt dưới VISION_MIN_CONFIDENCE và xe dừng ngay.
+        const visibleConfidence = leftFound
+          ? leftConfidence
+          : rightConfidence;
+
+        const oneLineScale = this.clamp(
+          Number(this.config.VISION_ONE_LINE_CONFIDENCE_SCALE) || 0.82,
+          0.35,
+          0.95
+        );
+
+        laneConfidence = this.clamp(
+          visibleConfidence * 0.55 +
+          widthConfidence * 0.22 +
+          temporalConfidence * 0.18 +
+          0.05,
+          0,
+          1
+        ) * oneLineScale;
+      }
+      else if (rawUsable && predictedFromHistory) {
+        const maxPredict = Math.max(
+          1,
+          Number(this.config.VISION_LOST_PREDICT_FRAMES) || 1
+        );
+
+        const progress = this.clamp(
+          this.unobservedFrames / maxPredict,
+          0,
+          1
+        );
+
+        const startConfidence = this.clamp(
+          Number(this.config.VISION_LOST_PREDICT_CONFIDENCE) || 0.56,
+          0.20,
+          0.80
+        );
+
+        laneConfidence = startConfidence * (1 - progress * 0.22);
       }
 
       const curveAlphaBase = this.clamp(
@@ -1499,29 +1590,91 @@
         0.95
       );
 
+      if (hasBothLines) {
+        this.oneLineFrames = 0;
+        this.unobservedFrames = 0;
+      }
+      else if (hasAnyObservedLine) {
+        this.oneLineFrames += 1;
+        this.unobservedFrames = 0;
+      }
+      else {
+        this.unobservedFrames += 1;
+      }
+
+      const oneLineMaxFrames = Math.max(
+        1,
+        Number(this.config.VISION_ONE_LINE_MAX_FRAMES) || 45
+      );
+
+      const oneLineExpired =
+        (leftInferred || rightInferred) &&
+        this.oneLineFrames > oneLineMaxFrames;
+
       const hasLane =
         curvesUsable &&
         widthValid &&
+        !oneLineExpired &&
         laneConfidence >= minConfidence &&
         Number.isFinite(lineError) &&
         Number.isFinite(headingErrorDeg);
 
+      let trackMode = "LOST_LINE";
+
+      if (hasLane && hasBothLines) {
+        trackMode = "TWO_LINES";
+      }
+      else if (hasLane && leftFound && rightInferred) {
+        trackMode = "LEFT_ONLY";
+      }
+      else if (hasLane && rightFound && leftInferred) {
+        trackMode = "RIGHT_ONLY";
+      }
+      else if (hasLane && predictedFromHistory) {
+        trackMode = "PREDICTED";
+      }
+
       if (hasLane) {
         this.lostFrames = 0;
+
+        // Prev curves phục vụ sliding-window frame sau. Có thể chứa biên ảo.
         this.prevLeftCurve = { ...leftCurve };
         this.prevRightCurve = { ...rightCurve };
-        this.prevLaneWidthNear = laneWidthNear;
+
+        // Nhưng width model CHỈ học khi cả hai biên đều là quan sát thật.
+        if (hasBothLines && Number.isFinite(laneWidthNear)) {
+          const observedWidthCurve = this.subtractCurves(
+            rawRightCurve,
+            rawLeftCurve
+          );
+
+          const widthAlpha = this.clamp(
+            Number(this.config.VISION_LANE_WIDTH_MODEL_ALPHA) || 0.16,
+            0.03,
+            0.50
+          );
+
+          this.prevLaneWidthCurve = this.smoothCurve(
+            observedWidthCurve,
+            this.prevLaneWidthCurve,
+            widthAlpha
+          );
+
+          this.prevLaneWidthNear = laneWidthNear;
+        }
       }
       else {
         this.lostFrames += 1;
 
-        // Sau một khoảng mất line, bỏ model cũ để detector được phép khởi tạo lại.
-        if (this.lostFrames > 12) {
+        // Nếu thật sự không quan sát thấy vạch đủ lâu thì bỏ cả model cũ.
+        if (this.unobservedFrames > 12 || this.lostFrames > 18) {
           this.prevLeftCurve = null;
           this.prevRightCurve = null;
           this.prevLaneWidthNear = null;
+          this.prevLaneWidthCurve = null;
           this.prevControlCenter = null;
           this.prevLookAheadCenter = null;
+          this.oneLineFrames = 0;
         }
       }
 
@@ -1548,9 +1701,14 @@
         leftFound,
         rightFound,
         hasBothLines,
+        hasVisualLine: hasAnyObservedLine,
         hasLane,
+        trackMode,
         leftInferred,
         rightInferred,
+        predictedFromHistory,
+        oneLineFrames: this.oneLineFrames,
+        unobservedFrames: this.unobservedFrames,
 
         leftX: Number.isFinite(leftNearX) ? leftNearX : null,
         rightX: Number.isFinite(rightNearX) ? rightNearX : null,
@@ -1698,8 +1856,10 @@
         ctx,
         lane.leftCurve,
         lane,
-        lane.leftInferred ? "#fdb022" : "#32d583",
-        lane.leftInferred,
+        lane.predictedFromHistory
+          ? "#a48afb"
+          : (lane.leftInferred ? "#fdb022" : "#32d583"),
+        lane.leftInferred || lane.predictedFromHistory,
         3
       );
 
@@ -1707,8 +1867,10 @@
         ctx,
         lane.rightCurve,
         lane,
-        lane.rightInferred ? "#fdb022" : "#32d583",
-        lane.rightInferred,
+        lane.predictedFromHistory
+          ? "#a48afb"
+          : (lane.rightInferred ? "#fdb022" : "#32d583"),
+        lane.rightInferred || lane.predictedFromHistory,
         3
       );
 
@@ -1786,6 +1948,7 @@
         .join("/");
 
       const lines = [
+        `Mode: ${lane.trackMode || "-"}`,
         `Otsu T: ${thresholds || "-"} · dark ${(lane.darkRatio * 100).toFixed(1)}%`,
         `Conf: ${(lane.laneConfidence * 100).toFixed(0)}% · width ${lane.laneWidth != null ? lane.laneWidth.toFixed(0) : "-"}px`,
         `Err: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px · head ${lane.headingErrorDeg != null ? lane.headingErrorDeg.toFixed(1) : "-"}°`,
