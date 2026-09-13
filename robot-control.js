@@ -18,7 +18,15 @@
     orientationPermissionReady: false,
     cameraPermissionReady: false,
     robotStatus: "disconnected",
-    cameraDebugOpen: false
+    cameraDebugOpen: false,
+
+    // Dùng để đồng bộ task đang có ở backend với RobotNavigation local.
+    navigationStarting: false,
+    navigationTaskKey: null,
+
+    // Nếu người dùng bấm DỪNG ROBOT, không tự khởi động lại đúng task đó
+    // chỉ vì backend vẫn còn báo ON TASK. Task mới vẫn được phép tự resume.
+    blockedResumeTaskKey: null
   };
 
   function token() {
@@ -72,6 +80,25 @@
     el.className = bad
       ? "control-message bad"
       : "muted control-message";
+  }
+
+  function buildNavigationTaskKey(task) {
+    if (!task || typeof task !== "object" || Array.isArray(task)) {
+      return null;
+    }
+
+    const hasTask = Object.keys(task).length > 0;
+    if (!hasTask) {
+      return null;
+    }
+
+    return [
+      task.command_id ?? "",
+      task.table ?? task.table_number ?? "",
+      task.line ?? "",
+      task.stop_index ?? "",
+      task.junction_turn ?? ""
+    ].join(":");
   }
 
   function updateCameraSwitchButton() {
@@ -557,6 +584,9 @@
 
       setMessage("ESP32 đã lưu task. Đang bật camera và bắt đầu bám line.");
       await startNavigation(task);
+
+      controlState.navigationTaskKey = buildNavigationTaskKey(task);
+      controlState.blockedResumeTaskKey = null;
     }
     catch (error) {
       log(`DISPATCH ERROR: ${error.message}`);
@@ -665,10 +695,88 @@
 
     navigation.updateSensors(controlState.sensors);
     navigation.start(task);
-    setMessage("Đang LINE_FOLLOW. Camera tìm 2 vạch đen, QR và IR2/IR3 cùng hỗ trợ điều hướng.");
+    setMessage("Đang LINE_FOLLOW CENTER-LOCK. Robot tự cân tâm camera lên center curve xanh dương; QR và IR2/IR3 vẫn hỗ trợ điều hướng.");
+  }
+
+  async function resumeNavigationFromRobotStatus(robotData) {
+    const task = robotData?.tasks;
+    const taskKey = buildNavigationTaskKey(task);
+
+    // Backend chưa có task thực sự.
+    if (!taskKey) {
+      return;
+    }
+
+    // Đang dispatch ngay trên frontend này thì để commitPendingDelivery()
+    // hoàn thành luồng ACK + startNavigation(), tránh start trùng.
+    if (controlState.dispatching) {
+      return;
+    }
+
+    // Đã có một lần resume/start đang chạy.
+    if (controlState.navigationStarting) {
+      return;
+    }
+
+    // Người dùng vừa bấm DỪNG ROBOT cho đúng task này.
+    // Không được tự chạy lại chỉ vì backend vẫn ON TASK.
+    if (controlState.blockedResumeTaskKey === taskKey) {
+      log(`AUTO RESUME BLOCKED task=${taskKey}`);
+      return;
+    }
+
+    const navigationAlreadyRunning =
+      controlState.navigationTaskKey === taskKey &&
+      navigation.state !== "IDLE" &&
+      navigation.state !== "STOPPED" &&
+      navigation.state !== "ERROR";
+
+    if (navigationAlreadyRunning) {
+      return;
+    }
+
+    controlState.navigationStarting = true;
+
+    try {
+      controlState.currentDispatch = {
+        task,
+        route: task,
+        restored_from_status: true
+      };
+
+      setMessage(
+        `Phát hiện task đang chạy: bàn ${task.table ?? task.table_number ?? "-"} · ` +
+        `Line ${task.line ?? "-"}. Đang khôi phục điều hướng...`
+      );
+
+      log(`RESUME NAVIGATION FROM STATUS ${JSON.stringify(task)}`);
+
+      await startNavigation(task);
+
+      controlState.navigationTaskKey = taskKey;
+      controlState.blockedResumeTaskKey = null;
+
+      log(`RESUME NAVIGATION OK task=${taskKey}`);
+    }
+    catch (error) {
+      log(`RESUME NAVIGATION ERROR: ${error.message}`);
+
+      setMessage(
+        `Backend đang ON TASK nhưng chưa khởi động được navigation: ${error.message}`,
+        true
+      );
+    }
+    finally {
+      controlState.navigationStarting = false;
+    }
   }
 
   function stopEverything(reason = "manual") {
+    // Ghi nhớ task bị người dùng dừng để status polling không tự bật lại.
+    if (controlState.navigationTaskKey) {
+      controlState.blockedResumeTaskKey = controlState.navigationTaskKey;
+    }
+
     try {
       navigation.stop(reason);
     } catch (_) {}
@@ -695,6 +803,9 @@
     setDebugAvailability(false);
     controlState.pendingDelivery = null;
     controlState.currentDispatch = null;
+    controlState.navigationStarting = false;
+    controlState.navigationTaskKey = null;
+    controlState.blockedResumeTaskKey = null;
     controlState.lastSyncedHasFood = null;
     controlState.sensors = {
       ir2: false,
@@ -716,15 +827,30 @@
     switchRobot(event.detail?.robot);
   });
 
-  window.addEventListener("robot:status-updated", (event) => {
+  window.addEventListener("robot:status-updated", async (event) => {
     const robot = Number(event.detail?.robot || 0);
     if (robot !== controlState.robot) {
       return;
     }
 
     const status = String(event.detail?.status || "disconnected").toLowerCase();
+    const robotData = event.detail?.robotData || {};
+
     controlState.robotStatus = status;
     setDebugAvailability(status === "on_task");
+
+    if (status === "on_task") {
+      // Trường hợp trang vừa reload: backend vẫn có task nhưng
+      // RobotNavigation local vừa khởi tạo lại ở IDLE.
+      // Tự lấy robotData.tasks và start navigation lại.
+      await resumeNavigationFromRobotStatus(robotData);
+      return;
+    }
+
+    // Khi backend xác nhận robot không còn ON TASK, task cũ kết thúc.
+    // Cho phép task tiếp theo được auto-resume bình thường.
+    controlState.navigationTaskKey = null;
+    controlState.blockedResumeTaskKey = null;
   });
 
   $("cameraDebugButton")?.addEventListener("click", async () => {
