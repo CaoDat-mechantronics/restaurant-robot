@@ -41,6 +41,10 @@
       this.lastVision = null;
       this.lastLineSeenAt = 0;
       this.lastMotorAt = 0;
+
+      // lastLogicalMotor: tốc độ nội bộ của thuật toán (-MAX_SPEED..MAX_SPEED).
+      // lastMotor: PWM thật đã map và gửi xuống ESP32 (-255..255).
+      this.lastLogicalMotor = { left: 0, right: 0 };
       this.lastMotor = { left: 0, right: 0 };
       this.controlTimer = null;
 
@@ -87,6 +91,7 @@
       this.qrStopPending = false;
       this.lastVision = null;
       this.lastLineSeenAt = performance.now();
+      this.lastLogicalMotor = { left: 0, right: 0 };
       this.lastMotor = { left: 0, right: 0 };
       this.resetLineController();
       this.setMotorReason("WAITING_VISION", "Đang chờ camera nhận diện lane");
@@ -1064,8 +1069,9 @@
           Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 20
         );
 
-        const deltaLeft = nextLeft - this.lastMotor.left;
-        const deltaRight = nextRight - this.lastMotor.right;
+        // Slew-rate phải chạy trên thang LOGIC, không dùng PWM thật đã map.
+        const deltaLeft = nextLeft - this.lastLogicalMotor.left;
+        const deltaRight = nextRight - this.lastLogicalMotor.right;
         const largestDelta = Math.max(
           Math.abs(deltaLeft),
           Math.abs(deltaRight)
@@ -1076,8 +1082,8 @@
         // vô tình biến một lệnh cua thành hai bánh bằng nhau.
         if (largestDelta > maxDelta) {
           const scale = maxDelta / largestDelta;
-          nextLeft = this.lastMotor.left + deltaLeft * scale;
-          nextRight = this.lastMotor.right + deltaRight * scale;
+          nextLeft = this.lastLogicalMotor.left + deltaLeft * scale;
+          nextRight = this.lastLogicalMotor.right + deltaRight * scale;
         }
       }
 
@@ -1089,10 +1095,23 @@
       nextLeft = this.clamp(nextLeft, -maxSpeed, maxSpeed);
       nextRight = this.clamp(nextRight, -maxSpeed, maxSpeed);
 
+      // Lưu tốc độ logic để lần sau slew-rate tiếp tục đúng thang.
+      this.lastLogicalMotor = {
+        left: nextLeft,
+        right: nextRight
+      };
+
+      // Chuyển tốc độ logic sang PWM vật lý:
+      //   0        -> 0 (STOP)
+      //   0..190   -> 180..255
+      //  -190..0   -> -255..-180
+      const outputLeft = this.mapMotorToPwm(nextLeft);
+      const outputRight = this.mapMotorToPwm(nextRight);
+
       this.lastMotorAt = now;
       this.lastMotor = {
-        left: Math.round(nextLeft),
-        right: Math.round(nextRight)
+        left: outputLeft,
+        right: outputRight
       };
 
       const published = this.mqtt.publishMotor(
@@ -1121,6 +1140,59 @@
         ...this.lastMotor,
         published: Boolean(published)
       });
+    }
+
+    // =====================================================
+    // MAP LOGICAL SPEED -> PHYSICAL PWM
+    // =====================================================
+    //
+    // Thuật toán vẫn chạy trên thang -MAX_SPEED..MAX_SPEED để giữ
+    // độ phân giải điều khiển. Trước khi publish MQTT mới map sang
+    // PWM thực tế đủ khỏe cho xe nặng.
+    //
+    // Ví dụ với MAX_SPEED=190, MIN_PWM=180, MAX_PWM=255:
+    //   0    -> 0
+    //   70   -> ~208
+    //   122  -> ~228
+    //   190  -> 255
+    //   -70  -> ~-208
+    //
+    mapMotorToPwm(value) {
+      const logicalValue = Number(value) || 0;
+
+      // Dừng phải luôn là đúng 0.
+      if (Math.abs(logicalValue) < 0.5) {
+        return 0;
+      }
+
+      const logicalMax = Math.max(
+        1,
+        Number(this.config.MAX_SPEED) || 190
+      );
+
+      const minPwm = this.clamp(
+        Number(this.config.MOTOR_MIN_PWM) || 180,
+        1,
+        254
+      );
+
+      const maxPwm = this.clamp(
+        Number(this.config.MOTOR_MAX_PWM) || 255,
+        minPwm,
+        255
+      );
+
+      const sign = logicalValue < 0 ? -1 : 1;
+      const magnitude = this.clamp(
+        Math.abs(logicalValue),
+        0,
+        logicalMax
+      );
+
+      const normalized = magnitude / logicalMax;
+      const pwm = minPwm + normalized * (maxPwm - minPwm);
+
+      return sign * Math.round(pwm);
     }
 
     clamp(value, min, max) {

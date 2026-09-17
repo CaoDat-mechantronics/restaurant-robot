@@ -116,7 +116,16 @@ window.APP_CONFIG = {
     // PATH FOLLOW CONTROLLER - ƯU TIÊN ĐIỂM HỒNG LOOK-AHEAD
     // ---------------------------------------------------
     BASE_SPEED: 122,
+
+    // Thang tốc độ LOGIC mà thuật toán path-follow sử dụng nội bộ.
+    // Giữ 190 để vẫn còn đủ độ phân giải khi tính chênh lệch trái/phải.
     MAX_SPEED: 190,
+
+    // PWM THỰC gửi xuống ESP32.
+    // 0 luôn là STOP. Mọi lệnh chạy khác 0 sẽ được map vào 180..255.
+    MOTOR_MIN_PWM: 180,
+    MOTOR_MAX_PWM: 255,
+
     MIN_CURVE_SPEED: 68,
 
     // pathAngle là góc vector:
