@@ -121,23 +121,33 @@ window.APP_CONFIG = {
     // Giữ 190 để vẫn còn đủ độ phân giải khi tính chênh lệch trái/phải.
     MAX_SPEED: 190,
 
-    // PWM THỰC gửi xuống ESP32.
-    // 0 luôn là STOP. Mọi lệnh chạy khác 0 sẽ nằm trong 200..255.
-    // Đây là tầng output vật lý; thuật toán bám đường vẫn tính trên thang logic 0..190.
-    MOTOR_MIN_PWM: 200,
+    // ===================================================
+    // MOTOR OUTPUT VẬT LÝ - KICK START + CRUISE
+    // ===================================================
+    //
+    // Xe nặng cần mô-men lớn để bắt đầu chuyển động, nhưng nếu luôn chạy
+    // 200..255 thì camera không kịp bám line. Vì vậy tầng output dùng 2 pha:
+    //
+    // 1) Sau MỖI lần STOP -> kick-start trong 500 ms với PWM tối thiểu 220.
+    // 2) Hết kick-start -> về PWM nền 180 và chỉ tăng bánh ngoài theo
+    //    correction của thuật toán path-follow.
+    //
+    // STOP luôn là đúng 0.
+    MOTOR_CRUISE_PWM: 180,
+    MOTOR_START_BOOST_PWM: 220,
+    MOTOR_START_BOOST_MS: 500,
     MOTOR_MAX_PWM: 255,
 
-    // Giá trị logic cực nhỏ được coi là STOP. Bình thường base speed luôn lớn hơn nhiều
-    // nên ngưỡng này chủ yếu chống nhiễu/số thực gần 0.
+    // Mức tăng tối đa của bánh nhanh hơn khi bám cua.
+    // Ví dụ cua trái gấp: Left ~= 180, Right có thể tăng dần tới 235.
+    MOTOR_STEERING_MAX_DELTA_PWM: 55,
+
+    // Nếu thuật toán logic yêu cầu tốc độ trung bình cao hơn BASE_SPEED,
+    // cho phép tăng nhẹ cả hai bánh. Bình thường chạy thẳng vẫn quanh 180.
+    MOTOR_CRUISE_EXTRA_MAX_PWM: 10,
+
+    // Giá trị logic cực nhỏ được coi là STOP.
     MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
-
-    // Gamma > 1 mở rộng chênh lệch PWM giữa bánh nhanh và bánh chậm trong vùng giữa,
-    // hữu ích với xe 4 bánh nặng dùng skid-steer.
-    MOTOR_PWM_GAMMA: 1.25,
-
-    // Sau khi map từng bánh vào 200..255, tăng thêm chênh lệch trái/phải quanh giá trị
-    // trung bình. Không làm đổi hướng cua và vẫn clamp trong 200..255.
-    MOTOR_PWM_STEERING_BOOST: 1.35,
 
     MIN_CURVE_SPEED: 68,
 

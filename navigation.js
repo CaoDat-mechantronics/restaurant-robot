@@ -48,6 +48,11 @@
       this.lastMotor = { left: 0, right: 0 };
       this.controlTimer = null;
 
+      // Sau mỗi lần motor về 0/0, lần chạy tiếp theo sẽ có một pha
+      // kick-start ngắn để thắng ma sát tĩnh của xe 4 bánh nặng.
+      this.motorNeedsStartBoost = true;
+      this.motorStartBoostUntil = 0;
+
       // PATH-FOLLOW controller:
       // - position error: center xanh gần xe so với tâm camera
       // - path angle: vector từ center xanh gần xe tới điểm hồng look-ahead
@@ -93,6 +98,8 @@
       this.lastLineSeenAt = performance.now();
       this.lastLogicalMotor = { left: 0, right: 0 };
       this.lastMotor = { left: 0, right: 0 };
+      this.motorNeedsStartBoost = true;
+      this.motorStartBoostUntil = 0;
       this.resetLineController();
       this.setMotorReason("WAITING_VISION", "Đang chờ camera nhận diện lane");
 
@@ -1046,7 +1053,22 @@
     }
 
     // =====================================================
-    // MOTOR OUTPUT + SLEW RATE LIMIT
+    // MOTOR OUTPUT
+    // =====================================================
+    //
+    // Hai tầng tách biệt:
+    //
+    // 1) Thuật toán path-follow vẫn tính tốc độ LOGIC trên thang
+    //    -MAX_SPEED..MAX_SPEED để giữ độ phân giải lái.
+    //
+    // 2) Tầng vật lý chuyển sang PWM theo cơ chế:
+    //
+    //    STOP        : 0 / 0
+    //    vừa khởi động: tối thiểu 220 trong ~500 ms
+    //    chạy ổn định : nền 180, bánh ngoài cua tăng dần tới 255
+    //
+    // Nhờ vậy xe có lực để bắt đầu chạy nhưng sau đó đủ chậm để camera
+    // tiếp tục nhận diện đường và điều chỉnh liên tục.
     // =====================================================
 
     sendMotor(left, right, force = false) {
@@ -1063,13 +1085,51 @@
       let nextLeft = Number(left) || 0;
       let nextRight = Number(right) || 0;
 
+      const zeroCutoff = Math.max(
+        0,
+        Number(this.config.MOTOR_ZERO_CUTOFF_LOGICAL) || 0.5
+      );
+
+      const requestedStop =
+        Math.abs(nextLeft) <= zeroCutoff &&
+        Math.abs(nextRight) <= zeroCutoff;
+
+      // ---------------------------------------------------
+      // STOP phải luôn tức thời và chính xác 0 / 0.
+      // Đồng thời đánh dấu để lần chạy kế tiếp có kick-start.
+      // ---------------------------------------------------
+      if (requestedStop) {
+        this.motorNeedsStartBoost = true;
+        this.motorStartBoostUntil = 0;
+        this.lastLogicalMotor = { left: 0, right: 0 };
+        this.lastMotorAt = now;
+        this.lastMotor = { left: 0, right: 0 };
+
+        const published = this.mqtt.publishMotor(0, 0);
+        this.updateMotorPublishDebug(published);
+        this.updateMotorDebugUi(0, 0);
+
+        this.onMotor({
+          left: 0,
+          right: 0,
+          published: Boolean(published),
+          boost: false
+        });
+
+        return;
+      }
+
+      // ---------------------------------------------------
+      // Slew-rate chạy trên thang LOGIC.
+      // Trong pha kick-start vẫn cho logical controller tiến dần tới
+      // target; khi hết 500 ms xe không bị giật sang một trạng thái cũ.
+      // ---------------------------------------------------
       if (!force) {
         const maxDelta = Math.max(
           1,
           Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 20
         );
 
-        // Slew-rate phải chạy trên thang LOGIC, không dùng PWM thật đã map.
         const deltaLeft = nextLeft - this.lastLogicalMotor.left;
         const deltaRight = nextRight - this.lastLogicalMotor.right;
         const largestDelta = Math.max(
@@ -1077,9 +1137,6 @@
           Math.abs(deltaRight)
         );
 
-        // Scale cả vector PWM cùng một tỷ lệ để vẫn giữ chênh lệch
-        // trái/phải. Nếu clamp từng bánh riêng, giai đoạn tăng tốc có thể
-        // vô tình biến một lệnh cua thành hai bánh bằng nhau.
         if (largestDelta > maxDelta) {
           const scale = maxDelta / largestDelta;
           nextLeft = this.lastLogicalMotor.left + deltaLeft * scale;
@@ -1095,27 +1152,36 @@
       nextLeft = this.clamp(nextLeft, -maxSpeed, maxSpeed);
       nextRight = this.clamp(nextRight, -maxSpeed, maxSpeed);
 
-      // Lưu tốc độ logic để lần sau slew-rate tiếp tục đúng thang.
       this.lastLogicalMotor = {
         left: nextLeft,
         right: nextRight
       };
 
-      // Chuyển cặp tốc độ logic sang PWM vật lý:
-      //   0        -> 0 (STOP)
-      //   > 0      -> 200..255
-      //   < 0      -> -200..-255
-      //
-      // Map theo cặp để có thể tăng tương phản trái/phải mà vẫn giữ đúng
-      // hướng cua do PATH_FOLLOW tính ra.
-      const mapped = this.mapMotorPairToPwm(nextLeft, nextRight);
-      const outputLeft = mapped.left;
-      const outputRight = mapped.right;
+      // ---------------------------------------------------
+      // Bắt đầu kick-start chỉ khi chuyển từ STOP -> RUN.
+      // ---------------------------------------------------
+      if (this.motorNeedsStartBoost) {
+        const boostMs = Math.max(
+          0,
+          Number(this.config.MOTOR_START_BOOST_MS) || 500
+        );
+
+        this.motorStartBoostUntil = now + boostMs;
+        this.motorNeedsStartBoost = false;
+      }
+
+      const boostActive = now < this.motorStartBoostUntil;
+
+      const mapped = this.mapMotorPairToPwm(
+        nextLeft,
+        nextRight,
+        boostActive
+      );
 
       this.lastMotorAt = now;
       this.lastMotor = {
-        left: outputLeft,
-        right: outputRight
+        left: mapped.left,
+        right: mapped.right
       };
 
       const published = this.mqtt.publishMotor(
@@ -1124,52 +1190,187 @@
       );
 
       this.updateMotorPublishDebug(published);
+      this.updateMotorDebugUi(
+        this.lastMotor.left,
+        this.lastMotor.right
+      );
 
-      // Cập nhật trực tiếp các ô motor trong DEBUG CAMERA.
-      // Làm ở navigation.js để chỉ cần apply 4 file chính,
-      // không phụ thuộc robot-control.js có phiên bản mới hay cũ.
-      if (typeof document !== "undefined") {
-        const leftDebug = document.getElementById("visionMotorLeftState");
-        const rightDebug = document.getElementById("visionMotorRightState");
-        const leftState = document.getElementById("leftMotorState");
-        const rightState = document.getElementById("rightMotorState");
+      if (boostActive) {
+        const remain = Math.max(
+          0,
+          Math.ceil(this.motorStartBoostUntil - now)
+        );
 
-        if (leftDebug) leftDebug.textContent = String(this.lastMotor.left);
-        if (rightDebug) rightDebug.textContent = String(this.lastMotor.right);
-        if (leftState) leftState.textContent = String(this.lastMotor.left);
-        if (rightState) rightState.textContent = String(this.lastMotor.right);
+        this.setMotorReason(
+          "KICK_START",
+          `PWM>=${Number(this.config.MOTOR_START_BOOST_PWM) || 220} · còn ${remain} ms`
+        );
       }
 
       this.onMotor({
         ...this.lastMotor,
-        published: Boolean(published)
+        published: Boolean(published),
+        boost: boostActive
       });
     }
 
     // =====================================================
-    // MAP LOGICAL SPEED -> PHYSICAL PWM 200..255
+    // MAP CẶP LOGICAL MOTOR -> PWM VẬT LÝ
     // =====================================================
     //
-    // Quy tắc đầu ra cuối cùng:
-    //   logical = 0       -> PWM = 0 (STOP)
-    //   logical > 0       -> PWM = +200..+255
-    //   logical < 0       -> PWM = -200..-255
+    // Chạy bình thường cùng chiều:
+    //   thẳng       -> khoảng 180 / 180
+    //   cua trái    -> 180 / (180..235)
+    //   cua phải    -> (180..235) / 180
     //
-    // Thuật toán path-follow vẫn dùng thang logic -MAX_SPEED..MAX_SPEED.
-    // Nhờ đó việc tính góc cua, correction, one-line, gyro turn... không bị
-    // mất độ phân giải chỉ vì motor vật lý cần PWM tối thiểu cao.
+    // Trong kick-start:
+    //   nền được nâng lên ít nhất 220 nhưng vẫn GIỮ chênh lệch lái.
+    //   Ví dụ cua trái ngay lúc bắt đầu có thể là 220 / 235,
+    //   không ép thành 220 / 220.
+    //
+    // Quay tại chỗ (hai dấu ngược nhau) vẫn giữ dấu để gyro turn hoạt động.
     // =====================================================
 
-    mapMotorToPwm(value) {
-      const logicalValue = Number(value) || 0;
-
+    mapMotorPairToPwm(left, right, boostActive = false) {
       const zeroCutoff = Math.max(
         0,
         Number(this.config.MOTOR_ZERO_CUTOFF_LOGICAL) || 0.5
       );
 
-      // STOP luôn phải thật sự bằng 0.
-      if (Math.abs(logicalValue) <= zeroCutoff) {
+      const leftValue = Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
+      const rightValue = Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
+
+      if (leftValue === 0 && rightValue === 0) {
+        return { left: 0, right: 0 };
+      }
+
+      const cruisePwm = this.clamp(
+        Number(this.config.MOTOR_CRUISE_PWM) || 180,
+        1,
+        254
+      );
+
+      const boostPwm = this.clamp(
+        Number(this.config.MOTOR_START_BOOST_PWM) || 220,
+        cruisePwm,
+        255
+      );
+
+      const maxPwm = this.clamp(
+        Number(this.config.MOTOR_MAX_PWM) || 255,
+        boostPwm,
+        255
+      );
+
+      const baseFloor = boostActive ? boostPwm : cruisePwm;
+
+      // ---------------------------------------------------
+      // Nếu một bên là 0 hoặc hai bên ngược dấu: đây là stop-one-side,
+      // reverse hoặc pivot turn. Map từng bánh nhưng vẫn bảo đảm kick-start
+      // khi vừa rời trạng thái dừng.
+      // ---------------------------------------------------
+      if (
+        leftValue === 0 ||
+        rightValue === 0 ||
+        Math.sign(leftValue) !== Math.sign(rightValue)
+      ) {
+        return {
+          left: this.mapSingleMotorPhysical(leftValue, baseFloor, maxPwm),
+          right: this.mapSingleMotorPhysical(rightValue, baseFloor, maxPwm)
+        };
+      }
+
+      // ---------------------------------------------------
+      // Hai bên cùng chiều: ưu tiên tốc độ nền thấp để camera theo kịp,
+      // và biểu diễn steering chủ yếu bằng cách TĂNG bánh ngoài cua.
+      // ---------------------------------------------------
+      const logicalMax = Math.max(
+        1,
+        Number(this.config.MAX_SPEED) || 190
+      );
+
+      const logicalBase = Math.max(
+        1,
+        Number(this.config.BASE_SPEED) || 122
+      );
+
+      const maxSteeringCorrection = Math.max(
+        1,
+        Number(this.config.MAX_STEERING_CORRECTION) || 92
+      );
+
+      const maxSteeringDeltaPwm = Math.max(
+        0,
+        Number(this.config.MOTOR_STEERING_MAX_DELTA_PWM) || 55
+      );
+
+      const cruiseExtraMax = Math.max(
+        0,
+        Number(this.config.MOTOR_CRUISE_EXTRA_MAX_PWM) || 10
+      );
+
+      const sign = Math.sign(leftValue);
+      const leftAbs = Math.abs(leftValue);
+      const rightAbs = Math.abs(rightValue);
+      const averageLogical = (leftAbs + rightAbs) / 2;
+
+      // Chạy thẳng thông thường vẫn ở 180.
+      // Chỉ khi logical controller thật sự đòi > BASE_SPEED mới tăng nhẹ
+      // cả hai bánh, tối đa thêm MOTOR_CRUISE_EXTRA_MAX_PWM.
+      const extraRatio = this.clamp(
+        (averageLogical - logicalBase) /
+          Math.max(1, logicalMax - logicalBase),
+        0,
+        1
+      );
+
+      let physicalBase = baseFloor;
+
+      if (!boostActive) {
+        physicalBase = this.clamp(
+          cruisePwm + extraRatio * cruiseExtraMax,
+          cruisePwm,
+          maxPwm
+        );
+      }
+
+      // halfDifference mang dấu:
+      // > 0 => bánh trái logic nhanh hơn => cua phải.
+      // < 0 => bánh phải logic nhanh hơn => cua trái.
+      const halfDifference = (leftAbs - rightAbs) / 2;
+      const steerRatio = this.clamp(
+        Math.abs(halfDifference) / maxSteeringCorrection,
+        0,
+        1
+      );
+
+      const steeringDelta = steerRatio * maxSteeringDeltaPwm;
+
+      let leftPwm = physicalBase;
+      let rightPwm = physicalBase;
+
+      if (halfDifference > 0) {
+        // Cua phải: bánh trái nhanh hơn.
+        leftPwm += steeringDelta;
+      }
+      else if (halfDifference < 0) {
+        // Cua trái: bánh phải nhanh hơn.
+        rightPwm += steeringDelta;
+      }
+
+      leftPwm = this.clamp(Math.round(leftPwm), baseFloor, maxPwm);
+      rightPwm = this.clamp(Math.round(rightPwm), baseFloor, maxPwm);
+
+      return {
+        left: sign * leftPwm,
+        right: sign * rightPwm
+      };
+    }
+
+    mapSingleMotorPhysical(value, floorPwm, maxPwm) {
+      const numeric = Number(value) || 0;
+
+      if (numeric === 0) {
         return 0;
       }
 
@@ -1178,107 +1379,35 @@
         Number(this.config.MAX_SPEED) || 190
       );
 
-      const minPwm = this.clamp(
-        Number(this.config.MOTOR_MIN_PWM) || 200,
-        1,
-        254
-      );
-
-      const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 255,
-        minPwm,
-        255
-      );
-
-      const gamma = this.clamp(
-        Number(this.config.MOTOR_PWM_GAMMA) || 1.25,
-        0.35,
-        3.0
-      );
-
-      const sign = logicalValue < 0 ? -1 : 1;
-      const magnitude = this.clamp(
-        Math.abs(logicalValue),
-        0,
-        logicalMax
-      );
-
-      const normalized = magnitude / logicalMax;
-      const shaped = Math.pow(normalized, gamma);
-      const pwm = minPwm + shaped * (maxPwm - minPwm);
-
-      return sign * Math.round(pwm);
-    }
-
-    mapMotorPairToPwm(left, right) {
-      let leftPwm = this.mapMotorToPwm(left);
-      let rightPwm = this.mapMotorToPwm(right);
-
-      const minPwm = this.clamp(
-        Number(this.config.MOTOR_MIN_PWM) || 200,
-        1,
-        254
-      );
-
-      const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 255,
-        minPwm,
-        255
-      );
-
-      // Nếu một bên STOP hoặc hai bên ngược chiều (pivot/gyro turn),
-      // giữ nguyên mapping từng bánh. Đây là trường hợp cần mô-men quay mạnh.
-      if (
-        leftPwm === 0 ||
-        rightPwm === 0 ||
-        Math.sign(leftPwm) !== Math.sign(rightPwm)
-      ) {
-        return {
-          left: this.enforcePhysicalPwm(leftPwm, minPwm, maxPwm),
-          right: this.enforcePhysicalPwm(rightPwm, minPwm, maxPwm)
-        };
-      }
-
-      // Hai bánh cùng chiều: tăng tương phản tốc độ để xe nặng vẫn cua được.
-      const boost = this.clamp(
-        Number(this.config.MOTOR_PWM_STEERING_BOOST) || 1.35,
-        1.0,
-        2.5
-      );
-
-      const sign = Math.sign(leftPwm);
-      const leftAbs = Math.abs(leftPwm);
-      const rightAbs = Math.abs(rightPwm);
-      const average = (leftAbs + rightAbs) / 2;
-      const halfDiff = ((leftAbs - rightAbs) / 2) * boost;
-
-      let boostedLeft = this.clamp(average + halfDiff, minPwm, maxPwm);
-      let boostedRight = this.clamp(average - halfDiff, minPwm, maxPwm);
-
-      leftPwm = sign * Math.round(boostedLeft);
-      rightPwm = sign * Math.round(boostedRight);
-
-      return {
-        left: this.enforcePhysicalPwm(leftPwm, minPwm, maxPwm),
-        right: this.enforcePhysicalPwm(rightPwm, minPwm, maxPwm)
-      };
-    }
-
-    enforcePhysicalPwm(value, minPwm, maxPwm) {
-      const numeric = Math.round(Number(value) || 0);
-
-      if (numeric === 0) {
-        return 0;
-      }
-
       const sign = numeric < 0 ? -1 : 1;
-      const magnitude = this.clamp(
-        Math.abs(numeric),
-        minPwm,
-        maxPwm
+      const normalized = this.clamp(
+        Math.abs(numeric) / logicalMax,
+        0,
+        1
       );
 
-      return sign * magnitude;
+      // Ở pivot/reverse, dùng toàn dải floor..255 để vẫn đủ mô-men quay.
+      const pwm = floorPwm + normalized * (maxPwm - floorPwm);
+
+      return sign * Math.round(
+        this.clamp(pwm, floorPwm, maxPwm)
+      );
+    }
+
+    updateMotorDebugUi(left, right) {
+      if (typeof document === "undefined") {
+        return;
+      }
+
+      const leftDebug = document.getElementById("visionMotorLeftState");
+      const rightDebug = document.getElementById("visionMotorRightState");
+      const leftState = document.getElementById("leftMotorState");
+      const rightState = document.getElementById("rightMotorState");
+
+      if (leftDebug) leftDebug.textContent = String(left);
+      if (rightDebug) rightDebug.textContent = String(right);
+      if (leftState) leftState.textContent = String(left);
+      if (rightState) rightState.textContent = String(right);
     }
 
     clamp(value, min, max) {
@@ -1286,7 +1415,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-17-pwm200-path-v2";
+  window.ROBOT_NAV_BUILD = "2026-09-17-kick180-v3";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;
