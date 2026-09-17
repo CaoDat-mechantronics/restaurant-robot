@@ -355,11 +355,46 @@
       );
     },
     onQr: (qr) => {
-      const text = String(qr?.text || "");
+      const text = String(qr?.text || "").trim();
+      const normalizedText = text.toLowerCase();
       const areaPercent = Number(qr?.areaPercent);
       const areaPx = Number(qr?.areaPx);
-      const stopPercent =
-        Number(navConfig.T_JUNCTION_STOP_AREA_PERCENT) || 12;
+
+      const currentTable = Number(
+        navigation?.task?.table ??
+        navigation?.task?.table_number ??
+        controlState.currentDispatch?.table ??
+        0
+      );
+
+      const tablePrefix = String(
+        navConfig.TABLE_QR_PREFIX || "ban_"
+      ).toLowerCase();
+
+      const expectedTableQr = currentTable > 0
+        ? `${tablePrefix}${currentTable}`
+        : "";
+
+      const junctionQr = String(
+        navConfig.JUNCTION_QR_TEXT ||
+        navConfig.T_JUNCTION_QR_TEXT ||
+        "nga_re"
+      ).toLowerCase();
+
+      let threshold = null;
+      let actionLabel = "chỉ nhận diện";
+
+      if (expectedTableQr && normalizedText === expectedTableQr) {
+        threshold = Number(navConfig.TABLE_QR_STOP_AREA_PERCENT) || 4;
+        actionLabel = `dừng bàn ${currentTable}`;
+      }
+      else if (normalizedText === junctionQr) {
+        threshold = Number(
+          navConfig.JUNCTION_QR_TRIGGER_AREA_PERCENT ??
+          navConfig.T_JUNCTION_STOP_AREA_PERCENT
+        ) || 12;
+        actionLabel = "rẽ 90°";
+      }
 
       const el = $("qrState");
       if (el) {
@@ -374,11 +409,17 @@
       const areaEl = $("visionQrAreaState");
       if (areaEl) {
         if (Number.isFinite(areaPercent) && Number.isFinite(areaPx)) {
+          const thresholdText = Number.isFinite(threshold)
+            ? ` · ${actionLabel} ≥ ${threshold}%`
+            : ` · ${actionLabel}`;
+
           areaEl.textContent =
-            `${areaPercent.toFixed(2)}% · ${Math.round(areaPx)} px² · dừng ≥ ${stopPercent}%`;
+            `${areaPercent.toFixed(2)}% · ${Math.round(areaPx)} px²${thresholdText}`;
 
           areaEl.className =
-            areaPercent >= stopPercent ? "good" : "warn";
+            Number.isFinite(threshold) && areaPercent >= threshold
+              ? "good"
+              : "warn";
         } else {
           areaEl.textContent = "-";
           areaEl.className = "muted";
@@ -695,7 +736,7 @@
 
     navigation.updateSensors(controlState.sensors);
     navigation.start(task);
-    setMessage("Đang LINE_FOLLOW CENTER-LOCK. Robot tự cân tâm camera lên center curve xanh dương; QR và IR2/IR3 vẫn hỗ trợ điều hướng.");
+    setMessage("Đang PATH_FOLLOW. Điểm hồng quyết định hướng cua; QR ban_<bàn> dùng để dừng tại bàn, QR nga_re dùng để rẽ 90°; IR2/IR3 vẫn bảo vệ biên.");
   }
 
   async function resumeNavigationFromRobotStatus(robotData) {
