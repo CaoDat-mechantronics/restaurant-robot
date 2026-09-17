@@ -1101,12 +1101,16 @@
         right: nextRight
       };
 
-      // Chuyển tốc độ logic sang PWM vật lý:
+      // Chuyển cặp tốc độ logic sang PWM vật lý:
       //   0        -> 0 (STOP)
-      //   0..190   -> 180..255
-      //  -190..0   -> -255..-180
-      const outputLeft = this.mapMotorToPwm(nextLeft);
-      const outputRight = this.mapMotorToPwm(nextRight);
+      //   > 0      -> 200..255
+      //   < 0      -> -200..-255
+      //
+      // Map theo cặp để có thể tăng tương phản trái/phải mà vẫn giữ đúng
+      // hướng cua do PATH_FOLLOW tính ra.
+      const mapped = this.mapMotorPairToPwm(nextLeft, nextRight);
+      const outputLeft = mapped.left;
+      const outputRight = mapped.right;
 
       this.lastMotorAt = now;
       this.lastMotor = {
@@ -1143,25 +1147,29 @@
     }
 
     // =====================================================
-    // MAP LOGICAL SPEED -> PHYSICAL PWM
+    // MAP LOGICAL SPEED -> PHYSICAL PWM 200..255
     // =====================================================
     //
-    // Thuật toán vẫn chạy trên thang -MAX_SPEED..MAX_SPEED để giữ
-    // độ phân giải điều khiển. Trước khi publish MQTT mới map sang
-    // PWM thực tế đủ khỏe cho xe nặng.
+    // Quy tắc đầu ra cuối cùng:
+    //   logical = 0       -> PWM = 0 (STOP)
+    //   logical > 0       -> PWM = +200..+255
+    //   logical < 0       -> PWM = -200..-255
     //
-    // Ví dụ với MAX_SPEED=190, MIN_PWM=180, MAX_PWM=255:
-    //   0    -> 0
-    //   70   -> ~208
-    //   122  -> ~228
-    //   190  -> 255
-    //   -70  -> ~-208
-    //
+    // Thuật toán path-follow vẫn dùng thang logic -MAX_SPEED..MAX_SPEED.
+    // Nhờ đó việc tính góc cua, correction, one-line, gyro turn... không bị
+    // mất độ phân giải chỉ vì motor vật lý cần PWM tối thiểu cao.
+    // =====================================================
+
     mapMotorToPwm(value) {
       const logicalValue = Number(value) || 0;
 
-      // Dừng phải luôn là đúng 0.
-      if (Math.abs(logicalValue) < 0.5) {
+      const zeroCutoff = Math.max(
+        0,
+        Number(this.config.MOTOR_ZERO_CUTOFF_LOGICAL) || 0.5
+      );
+
+      // STOP luôn phải thật sự bằng 0.
+      if (Math.abs(logicalValue) <= zeroCutoff) {
         return 0;
       }
 
@@ -1171,7 +1179,7 @@
       );
 
       const minPwm = this.clamp(
-        Number(this.config.MOTOR_MIN_PWM) || 180,
+        Number(this.config.MOTOR_MIN_PWM) || 200,
         1,
         254
       );
@@ -1182,6 +1190,12 @@
         255
       );
 
+      const gamma = this.clamp(
+        Number(this.config.MOTOR_PWM_GAMMA) || 1.25,
+        0.35,
+        3.0
+      );
+
       const sign = logicalValue < 0 ? -1 : 1;
       const magnitude = this.clamp(
         Math.abs(logicalValue),
@@ -1190,15 +1204,90 @@
       );
 
       const normalized = magnitude / logicalMax;
-      const pwm = minPwm + normalized * (maxPwm - minPwm);
+      const shaped = Math.pow(normalized, gamma);
+      const pwm = minPwm + shaped * (maxPwm - minPwm);
 
       return sign * Math.round(pwm);
+    }
+
+    mapMotorPairToPwm(left, right) {
+      let leftPwm = this.mapMotorToPwm(left);
+      let rightPwm = this.mapMotorToPwm(right);
+
+      const minPwm = this.clamp(
+        Number(this.config.MOTOR_MIN_PWM) || 200,
+        1,
+        254
+      );
+
+      const maxPwm = this.clamp(
+        Number(this.config.MOTOR_MAX_PWM) || 255,
+        minPwm,
+        255
+      );
+
+      // Nếu một bên STOP hoặc hai bên ngược chiều (pivot/gyro turn),
+      // giữ nguyên mapping từng bánh. Đây là trường hợp cần mô-men quay mạnh.
+      if (
+        leftPwm === 0 ||
+        rightPwm === 0 ||
+        Math.sign(leftPwm) !== Math.sign(rightPwm)
+      ) {
+        return {
+          left: this.enforcePhysicalPwm(leftPwm, minPwm, maxPwm),
+          right: this.enforcePhysicalPwm(rightPwm, minPwm, maxPwm)
+        };
+      }
+
+      // Hai bánh cùng chiều: tăng tương phản tốc độ để xe nặng vẫn cua được.
+      const boost = this.clamp(
+        Number(this.config.MOTOR_PWM_STEERING_BOOST) || 1.35,
+        1.0,
+        2.5
+      );
+
+      const sign = Math.sign(leftPwm);
+      const leftAbs = Math.abs(leftPwm);
+      const rightAbs = Math.abs(rightPwm);
+      const average = (leftAbs + rightAbs) / 2;
+      const halfDiff = ((leftAbs - rightAbs) / 2) * boost;
+
+      let boostedLeft = this.clamp(average + halfDiff, minPwm, maxPwm);
+      let boostedRight = this.clamp(average - halfDiff, minPwm, maxPwm);
+
+      leftPwm = sign * Math.round(boostedLeft);
+      rightPwm = sign * Math.round(boostedRight);
+
+      return {
+        left: this.enforcePhysicalPwm(leftPwm, minPwm, maxPwm),
+        right: this.enforcePhysicalPwm(rightPwm, minPwm, maxPwm)
+      };
+    }
+
+    enforcePhysicalPwm(value, minPwm, maxPwm) {
+      const numeric = Math.round(Number(value) || 0);
+
+      if (numeric === 0) {
+        return 0;
+      }
+
+      const sign = numeric < 0 ? -1 : 1;
+      const magnitude = this.clamp(
+        Math.abs(numeric),
+        minPwm,
+        maxPwm
+      );
+
+      return sign * magnitude;
     }
 
     clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
     }
   }
+
+  window.ROBOT_NAV_BUILD = "2026-09-17-pwm200-path-v2";
+  console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;
   window.RobotNavigation = RobotNavigation;

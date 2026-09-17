@@ -21,7 +21,7 @@ window.APP_CONFIG = {
     // CAMERA / TẦN SỐ XỬ LÝ
     // ---------------------------------------------------
     // Mobile/tablet vẫn ưu tiên camera trước; desktop dùng camera mặc định.
-    CAMERA_FACING_MODE: "user",
+    CAMERA_FACING_MODE: "environment",
 
     // Ảnh debug vẫn hiển thị stream đầy đủ; riêng thuật toán line resize
     // xuống 480px để giữ realtime trên điện thoại.
@@ -122,9 +122,22 @@ window.APP_CONFIG = {
     MAX_SPEED: 190,
 
     // PWM THỰC gửi xuống ESP32.
-    // 0 luôn là STOP. Mọi lệnh chạy khác 0 sẽ được map vào 180..255.
-    MOTOR_MIN_PWM: 180,
+    // 0 luôn là STOP. Mọi lệnh chạy khác 0 sẽ nằm trong 200..255.
+    // Đây là tầng output vật lý; thuật toán bám đường vẫn tính trên thang logic 0..190.
+    MOTOR_MIN_PWM: 200,
     MOTOR_MAX_PWM: 255,
+
+    // Giá trị logic cực nhỏ được coi là STOP. Bình thường base speed luôn lớn hơn nhiều
+    // nên ngưỡng này chủ yếu chống nhiễu/số thực gần 0.
+    MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
+
+    // Gamma > 1 mở rộng chênh lệch PWM giữa bánh nhanh và bánh chậm trong vùng giữa,
+    // hữu ích với xe 4 bánh nặng dùng skid-steer.
+    MOTOR_PWM_GAMMA: 1.25,
+
+    // Sau khi map từng bánh vào 200..255, tăng thêm chênh lệch trái/phải quanh giá trị
+    // trung bình. Không làm đổi hướng cua và vẫn clamp trong 200..255.
+    MOTOR_PWM_STEERING_BOOST: 1.35,
 
     MIN_CURVE_SPEED: 68,
 
