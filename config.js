@@ -133,7 +133,7 @@ window.APP_CONFIG = {
     //    correction của thuật toán path-follow.
     //
     // STOP luôn là đúng 0.
-    MOTOR_CRUISE_PWM: 160,
+    MOTOR_CRUISE_PWM: 120,
     MOTOR_START_BOOST_PWM: 190,
     MOTOR_START_BOOST_MS: 30,
     MOTOR_MAX_PWM: 255,
