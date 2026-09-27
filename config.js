@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Blue-Curve Strong Turn · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Adaptive Curve + Gyro · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -136,11 +136,11 @@ window.APP_CONFIG = {
     // MOTOR_MIN_RUN_PWM: PWM nhỏ nhất dùng khi bánh cần quay.
     // MOTOR_CRUISE_PWM : PWM chạy thẳng mặc định.
     // START_BOOST đang tắt (0 ms); chỉ bật lại nếu thực tế vẫn khó đề-pa.
-    MOTOR_MIN_RUN_PWM: 62,
+    MOTOR_MIN_RUN_PWM: 50,
     MOTOR_CRUISE_PWM: 98,
     MOTOR_START_BOOST_PWM: 112,
     MOTOR_START_BOOST_MS: 0,
-    MOTOR_MAX_PWM: 185,
+    MOTOR_MAX_PWM: 240,
 
 
     // Giá trị logic cực nhỏ được coi là STOP.
@@ -218,7 +218,7 @@ window.APP_CONFIG = {
     // Severity được tính trực tiếp từ hình học centerCurve xanh:
     // heading gần->lookahead, độ uốn của curve và độ lệch lookahead.
     // Cua càng gắt -> yêu cầu chênh PWM trái/phải tối thiểu càng lớn.
-    BLUE_CURVE_FEEDFORWARD_ENABLE: true,
+    BLUE_CURVE_FEEDFORWARD_ENABLE: false,
 
     // Khi severity dưới mức này, không ép thêm PWM gap.
     BLUE_CURVE_GAP_ACTIVATE_SEVERITY: 0.12,
@@ -239,7 +239,7 @@ window.APP_CONFIG = {
     // severity = 100%:
     //   LEFT  -> khoảng 70 / 185
     //   RIGHT -> khoảng 185 / 70
-    BLUE_CURVE_DIRECT_SPEED_ENABLE: true,
+    BLUE_CURVE_DIRECT_SPEED_ENABLE: false,
     BLUE_CURVE_DIRECT_ACTIVATE_SEVERITY: 0.15,
     BLUE_CURVE_DIRECT_EXPONENT: 0.90,
     BLUE_CURVE_INNER_PWM_AT_FULL_CURVE: 70,
@@ -249,6 +249,53 @@ window.APP_CONFIG = {
     BLUE_CURVE_HEADING_FULL_DEG: 13,
     BLUE_CURVE_BEND_FULL_DEG: 8,
     BLUE_CURVE_LATERAL_FULL_RATIO: 0.11,
+
+    // ===================================================
+    // ADAPTIVE CURVATURE CONTROLLER
+    // ===================================================
+    // Không gán cứng severity=100% thành một cặp PWM cụ thể.
+    // Đường xanh tạo turn ratio liên tục. Gyro đo robot quay thực tế
+    // và tự tăng/giảm steering khi robot understeer/oversteer.
+    ADAPTIVE_CURVE_ENABLE: true,
+
+    // Dưới mức này coi gần như thẳng và giữ output Precision V2.
+    ADAPTIVE_CURVE_ACTIVATE_SEVERITY: 0.06,
+
+    // Hình học đường xanh -> turn ratio.
+    // ratio=0: hai bên bằng nhau.
+    // ratio=1: bánh trong có thể tiến gần 0 trong mô hình động học.
+    // >1 cho phép cua rất gắt nhưng LINE_FOLLOW vẫn không reverse.
+    ADAPTIVE_CURVE_MAX_TURN_RATIO: 1.45,
+    ADAPTIVE_CURVE_EXPONENT: 1.05,
+
+    // PWM nhỏ nhất mà adaptive controller được phép yêu cầu cho bánh trong.
+    // Đây là GIỚI HẠN PHẦN CỨNG, không phải tốc độ cua hard-code.
+    // Nếu motor của bạn vẫn quay ổn ở PWM thấp hơn, có thể giảm tiếp.
+    ADAPTIVE_CURVE_MIN_INNER_PWM: 45,
+
+    // Giới hạn output vật lý. Bánh ngoài có thể tự tăng tới mức này
+    // khi đường cong yêu cầu hoặc gyro báo robot quay chưa đủ.
+    ADAPTIVE_CURVE_MAX_OUTER_PWM: 240,
+
+    // Giới hạn tốc độ thay đổi của turn ratio giữa hai vòng điều khiển
+    // để tránh giật mạnh khi camera noise.
+    ADAPTIVE_CURVE_RATIO_MAX_DELTA: 0.10,
+
+    // ---------------- Gyro closed-loop ----------------
+    ADAPTIVE_YAW_FEEDBACK_ENABLE: true,
+
+    // Curve severity -> yaw-rate mục tiêu. Đây không phải PWM cố định:
+    // PWM được tự điều chỉnh cho tới khi yaw-rate thực tế tiến gần mục tiêu.
+    ADAPTIVE_YAW_RATE_MAX_DEG_S: 95,
+    ADAPTIVE_YAW_RATE_EXPONENT: 1.00,
+
+    // Low-pass cho yaw-rate đo từ DeviceOrientation.
+    ADAPTIVE_YAW_RATE_EMA_ALPHA: 0.26,
+
+    // Feedback gain: understeer -> tăng ratio; oversteer -> giảm ratio.
+    ADAPTIVE_YAW_KP: 0.0070,
+    ADAPTIVE_YAW_KI: 0.0008,
+    ADAPTIVE_YAW_INTEGRAL_LIMIT: 45,
 
     // Không sử dụng frame camera quá cũ để tiếp tục lái.
     VISION_MAX_FRAME_AGE_MS: 160,

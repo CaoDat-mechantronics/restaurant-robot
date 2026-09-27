@@ -251,7 +251,7 @@
           <div><span>Firmware ESP32</span><b id="visionFirmwareBuildState">chưa nhận</b></div>
           <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
           <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
-          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Precision V2 · Blue-Curve FF · 4-Motor</b></div>
+          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Precision V2 · Adaptive Curve + Gyro · 4-Motor</b></div>
           <div><span>Config / Vision / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
@@ -415,8 +415,20 @@
             <b id="blueCurveState">-</b>
           </div>
           <div>
-            <span>Target PWM gap</span>
+            <span>Target PWM gap / ratio</span>
             <b id="curveGapState">0 PWM</b>
+          </div>
+          <div>
+            <span>Adaptive turn ratio</span>
+            <b id="adaptiveRatioState">0.00</b>
+          </div>
+          <div>
+            <span>Yaw-rate mục tiêu</span>
+            <b id="targetYawRateState">0.0°/s</b>
+          </div>
+          <div>
+            <span>Yaw-rate thực tế</span>
+            <b id="actualYawRateState">0.0°/s</b>
           </div>
           <div>
             <span>Lý do motor</span>
@@ -428,7 +440,7 @@
           </div>
           <div>
             <span>Source build</span>
-            <b id="sourceBuildState">2026-09-27 · Precision V2 · Blue-Curve FF · 4-Motor</b>
+            <b id="sourceBuildState">2026-09-27 · Precision V2 · Adaptive Curve + Gyro · 4-Motor</b>
           </div>
           <div>
             <span>Config / Vision / Navigation</span>
@@ -646,7 +658,7 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20260927-bluecurve-v3-strong-turn"></script>
+<script src="P260927-adaptive-curve-yaw-v1"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -656,8 +668,8 @@
 <script src="gemini-live.js?v=20260927-bluecurve-v3-strong-turn"></script>
 <script src="mqtt-robot.js?v=20260927-bluecurve-v3-strong-turn"></script>
 <script src="orientation.js?v=20260927-bluecurve-v3-strong-turn"></script>
-<script src="vision.js?v=20260927-bluecurve-v3-strong-turn"></script>
-<script src="navigation.js?v=20260927-bluecurve-v3-strong-turn"></script>
+<script src="P260927-adaptive-curve-yaw-v1"></script>
+<script src="P260927-adaptive-curve-yaw-v1"></script>
 <script src="app.js?v=20260927-bluecurve-v3-strong-turn"></script>
 <script src="robot-control.js?v=20260927-bluecurve-v3-strong-turn"></script>
 <script>

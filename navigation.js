@@ -84,6 +84,14 @@
       this.blueCurveSeverity = 0;
       this.blueCurveTargetGap = 0;
       this.filteredBlueCurveGap = 0;
+
+      // Adaptive curvature + yaw feedback.
+      this.adaptiveTurnRatio = 0;
+      this.adaptiveTargetYawRate = 0;
+      this.adaptiveActualYawRate = 0;
+      this.adaptiveYawIntegral = 0;
+      this.adaptivePrevYaw = null;
+      this.adaptivePrevYawAt = 0;
     }
 
     // =====================================================
@@ -108,6 +116,7 @@
       this.motorNeedsStartBoost = true;
       this.motorStartBoostUntil = 0;
       this.resetLineController();
+      this.resetAdaptiveCurveController();
       this.setMotorReason("WAITING_VISION", "Đang chờ camera nhận diện lane");
 
       this.setState(NAV_STATE.LINE_FOLLOW);
@@ -651,7 +660,7 @@
         1
       );
       this.blueCurveDirection = String(frame.blueCurveDirection || "STRAIGHT");
-      this.updateBlueCurveGapTarget();
+      this.updateAdaptiveYawRate();
 
       const positionDeadband = Math.max(
         0,
@@ -1252,9 +1261,9 @@
         boostActive
       );
 
-      // Precision V2 quyết định hướng và correction; lớp này chỉ đảm bảo
-      // độ chênh PWM tối thiểu tỷ lệ với độ cong của chính đường xanh.
-      mapped = this.applyBlueCurvePwmGap(mapped);
+      // Precision V2 giữ lane. Lớp adaptive dùng độ cong đường xanh
+      // + yaw-rate thực tế để tự quyết định steering authority liên tục.
+      mapped = this.applyAdaptiveCurveControl(mapped);
 
       this.lastMotorAt = now;
       this.lastMotor = {
@@ -1441,6 +1450,358 @@
       }
 
       return sign * Math.round(this.clamp(pwm, minRunPwm, maxPwm));
+    }
+
+
+    // =====================================================
+    // ADAPTIVE CURVATURE + GYRO FEEDBACK
+    // =====================================================
+
+    resetAdaptiveCurveController() {
+      this.adaptiveTurnRatio = 0;
+      this.adaptiveTargetYawRate = 0;
+      this.adaptiveActualYawRate = 0;
+      this.adaptiveYawIntegral = 0;
+      this.adaptivePrevYaw = null;
+      this.adaptivePrevYawAt = 0;
+      this.updateAdaptiveCurveDebugUi();
+    }
+
+    updateAdaptiveYawRate() {
+      const yaw = this.orientation?.getYaw?.();
+      const now = performance.now();
+
+      if (!Number.isFinite(Number(yaw))) {
+        this.adaptivePrevYaw = null;
+        this.adaptivePrevYawAt = now;
+        this.adaptiveActualYawRate = 0;
+        return;
+      }
+
+      const currentYaw = Number(yaw);
+
+      if (
+        this.adaptivePrevYaw == null ||
+        this.adaptivePrevYawAt <= 0
+      ) {
+        this.adaptivePrevYaw = currentYaw;
+        this.adaptivePrevYawAt = now;
+        return;
+      }
+
+      const dt = (now - this.adaptivePrevYawAt) / 1000;
+
+      if (dt < 0.015 || dt > 0.35) {
+        this.adaptivePrevYaw = currentYaw;
+        this.adaptivePrevYawAt = now;
+        return;
+      }
+
+      const deltaYaw =
+        window.RobotOrientation?.deltaDegrees
+          ? window.RobotOrientation.deltaDegrees(
+              currentYaw,
+              this.adaptivePrevYaw
+            )
+          : currentYaw - this.adaptivePrevYaw;
+
+      const rawRate = deltaYaw / dt;
+
+      const alpha = this.clamp(
+        Number(this.config.ADAPTIVE_YAW_RATE_EMA_ALPHA) || 0.26,
+        0.05,
+        1
+      );
+
+      this.adaptiveActualYawRate +=
+        alpha * (rawRate - this.adaptiveActualYawRate);
+
+      this.adaptivePrevYaw = currentYaw;
+      this.adaptivePrevYawAt = now;
+    }
+
+    applyAdaptiveCurveControl(mapped) {
+      if (
+        this.config.ADAPTIVE_CURVE_ENABLE === false ||
+        this.state !== NAV_STATE.LINE_FOLLOW ||
+        !mapped ||
+        mapped.left <= 0 ||
+        mapped.right <= 0
+      ) {
+        this.adaptiveTurnRatio = 0;
+        this.adaptiveTargetYawRate = 0;
+        this.adaptiveYawIntegral = 0;
+        this.updateAdaptiveCurveDebugUi();
+        return mapped;
+      }
+
+      const severity = this.clamp(
+        Number(this.blueCurveSeverity) || 0,
+        0,
+        1
+      );
+
+      const direction =
+        this.blueCurveDirection === "LEFT"
+          ? -1
+          : this.blueCurveDirection === "RIGHT"
+            ? 1
+            : 0;
+
+      const activate = this.clamp(
+        Number(this.config.ADAPTIVE_CURVE_ACTIVATE_SEVERITY) || 0.06,
+        0,
+        0.8
+      );
+
+      if (direction === 0 || severity <= activate) {
+        this.adaptiveTurnRatio *= 0.72;
+        this.adaptiveTargetYawRate = 0;
+        this.adaptiveYawIntegral *= 0.65;
+        this.updateAdaptiveCurveDebugUi();
+        return {
+          left: Math.round(mapped.left),
+          right: Math.round(mapped.right)
+        };
+      }
+
+      // ---------------------------------------------------
+      // 1) Camera feed-forward từ hình học đường xanh
+      // ---------------------------------------------------
+      const normalized = this.clamp(
+        (severity - activate) /
+          Math.max(0.001, 1 - activate),
+        0,
+        1
+      );
+
+      const curveExponent = Math.max(
+        0.45,
+        Number(this.config.ADAPTIVE_CURVE_EXPONENT) || 1.05
+      );
+
+      const maxTurnRatio = Math.max(
+        0.2,
+        Number(this.config.ADAPTIVE_CURVE_MAX_TURN_RATIO) || 1.45
+      );
+
+      let targetRatio =
+        Math.pow(normalized, curveExponent) *
+        maxTurnRatio;
+
+      // ---------------------------------------------------
+      // 2) Gyro feedback
+      // ---------------------------------------------------
+      const yawFeedbackEnabled =
+        this.config.ADAPTIVE_YAW_FEEDBACK_ENABLE !== false;
+
+      const yawMax = Math.max(
+        10,
+        Number(this.config.ADAPTIVE_YAW_RATE_MAX_DEG_S) || 95
+      );
+
+      const yawExponent = Math.max(
+        0.5,
+        Number(this.config.ADAPTIVE_YAW_RATE_EXPONENT) || 1
+      );
+
+      const targetYawMagnitude =
+        yawMax * Math.pow(normalized, yawExponent);
+
+      this.adaptiveTargetYawRate =
+        direction * targetYawMagnitude;
+
+      if (
+        yawFeedbackEnabled &&
+        Number.isFinite(this.adaptiveActualYawRate)
+      ) {
+        // Chuyển sai số về hệ toạ độ "đúng hướng cua":
+        // >0 = robot quay CHƯA ĐỦ -> tăng steering.
+        // <0 = robot quay QUÁ NHIỀU -> giảm steering.
+        const directionalActual =
+          direction * this.adaptiveActualYawRate;
+
+        const directionalError =
+          targetYawMagnitude - directionalActual;
+
+        const kp = Math.max(
+          0,
+          Number(this.config.ADAPTIVE_YAW_KP) || 0.007
+        );
+
+        const ki = Math.max(
+          0,
+          Number(this.config.ADAPTIVE_YAW_KI) || 0.0008
+        );
+
+        const integralLimit = Math.max(
+          1,
+          Number(this.config.ADAPTIVE_YAW_INTEGRAL_LIMIT) || 45
+        );
+
+        const dt = Math.max(
+          0.02,
+          (Number(this.config.MOTOR_INTERVAL_MS) || 40) / 1000
+        );
+
+        this.adaptiveYawIntegral = this.clamp(
+          this.adaptiveYawIntegral + directionalError * dt,
+          -integralLimit,
+          integralLimit
+        );
+
+        targetRatio +=
+          kp * directionalError +
+          ki * this.adaptiveYawIntegral;
+      }
+
+      targetRatio = this.clamp(
+        targetRatio,
+        0,
+        maxTurnRatio
+      );
+
+      // ---------------------------------------------------
+      // 3) Slew ratio để steering không giật
+      // ---------------------------------------------------
+      const ratioMaxDelta = Math.max(
+        0.01,
+        Number(this.config.ADAPTIVE_CURVE_RATIO_MAX_DELTA) || 0.10
+      );
+
+      const ratioDelta = this.clamp(
+        targetRatio - this.adaptiveTurnRatio,
+        -ratioMaxDelta,
+        ratioMaxDelta
+      );
+
+      this.adaptiveTurnRatio = this.clamp(
+        this.adaptiveTurnRatio + ratioDelta,
+        0,
+        maxTurnRatio
+      );
+
+      // ---------------------------------------------------
+      // 4) Differential-drive allocation
+      // ---------------------------------------------------
+      // centerPwm lấy trực tiếp từ Precision V2 hiện tại, nên tốc độ nền
+      // vẫn giảm theo cua/confidence như trước.
+      const centerPwm = Math.max(
+        1,
+        (Math.abs(mapped.left) + Math.abs(mapped.right)) / 2
+      );
+
+      const minInner = this.clamp(
+        Number(this.config.ADAPTIVE_CURVE_MIN_INNER_PWM) || 45,
+        0,
+        254
+      );
+
+      const maxOuter = this.clamp(
+        Number(this.config.ADAPTIVE_CURVE_MAX_OUTER_PWM) ||
+          Number(this.config.MOTOR_MAX_PWM) ||
+          240,
+        minInner + 1,
+        255
+      );
+
+      // gap = 2 * center * ratio.
+      // ratio tăng liên tục theo curvature + yaw error.
+      const desiredGap =
+        2 * centerPwm * this.adaptiveTurnRatio;
+
+      let inner = centerPwm - desiredGap / 2;
+      let outer = centerPwm + desiredGap / 2;
+
+      // Nếu inner chạm giới hạn, giữ gap bằng cách tiếp tục tăng outer.
+      if (inner < minInner) {
+        inner = minInner;
+        outer = minInner + desiredGap;
+      }
+
+      // Nếu outer chạm max, cố giữ gap bằng cách giảm inner.
+      if (outer > maxOuter) {
+        outer = maxOuter;
+        inner = maxOuter - desiredGap;
+      }
+
+      inner = this.clamp(inner, minInner, maxOuter);
+      outer = this.clamp(outer, minInner, maxOuter);
+
+      let left;
+      let right;
+
+      if (direction < 0) {
+        // LEFT curve
+        left = inner;
+        right = outer;
+      }
+      else {
+        // RIGHT curve
+        left = outer;
+        right = inner;
+      }
+
+      // Giữ correction Precision V2 nếu nó đã mạnh hơn adaptive target
+      // theo cùng hướng.
+      if (direction < 0 && mapped.right > mapped.left) {
+        const mappedGap = mapped.right - mapped.left;
+        if (mappedGap > right - left) {
+          left = mapped.left;
+          right = mapped.right;
+        }
+      }
+      else if (direction > 0 && mapped.left > mapped.right) {
+        const mappedGap = mapped.left - mapped.right;
+        if (mappedGap > left - right) {
+          left = mapped.left;
+          right = mapped.right;
+        }
+      }
+
+      left = Math.round(
+        this.clamp(left, 0, maxOuter)
+      );
+      right = Math.round(
+        this.clamp(right, 0, maxOuter)
+      );
+
+      this.blueCurveTargetGap = Math.abs(left - right);
+      this.updateAdaptiveCurveDebugUi();
+
+      return { left, right };
+    }
+
+    updateAdaptiveCurveDebugUi() {
+      if (typeof document === "undefined") return;
+
+      const severityText =
+        `${this.blueCurveDirection} · ${Math.round((this.blueCurveSeverity || 0) * 100)}%`;
+
+      const ratioText =
+        `${(this.adaptiveTurnRatio || 0).toFixed(2)} · gap ${Math.round(this.blueCurveTargetGap || 0)} PWM`;
+
+      const targetYawText =
+        `${(this.adaptiveTargetYawRate || 0).toFixed(1)}°/s`;
+
+      const actualYawText =
+        `${(this.adaptiveActualYawRate || 0).toFixed(1)}°/s`;
+
+      const severityEl = document.getElementById("visionBlueCurveState");
+      const mainSeverityEl = document.getElementById("blueCurveState");
+      const gapEl = document.getElementById("visionCurveGapState");
+      const mainGapEl = document.getElementById("curveGapState");
+      const ratioEl = document.getElementById("adaptiveRatioState");
+      const targetYawEl = document.getElementById("targetYawRateState");
+      const actualYawEl = document.getElementById("actualYawRateState");
+
+      if (severityEl) severityEl.textContent = severityText;
+      if (mainSeverityEl) mainSeverityEl.textContent = severityText;
+      if (gapEl) gapEl.textContent = ratioText;
+      if (mainGapEl) mainGapEl.textContent = ratioText;
+      if (ratioEl) ratioEl.textContent = ratioText;
+      if (targetYawEl) targetYawEl.textContent = targetYawText;
+      if (actualYawEl) actualYawEl.textContent = actualYawText;
     }
 
     updateBlueCurveGapTarget() {
@@ -1718,7 +2079,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;
