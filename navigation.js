@@ -632,12 +632,12 @@
       // ===================================================
       // 4) Tốc độ cơ sở: cua gấp -> giảm tốc
       // ===================================================
-      const configuredBase = Number(this.config.BASE_SPEED) || 94;
+      const configuredBase = Number(this.config.BASE_SPEED) || 92;
       const minCurveSpeed = Math.min(
         configuredBase,
-        Number(this.config.MIN_CURVE_SPEED) || 45
+        Number(this.config.MIN_CURVE_SPEED) || 44
       );
-      const maxSpeed = Number(this.config.MAX_SPEED) || 160;
+      const maxSpeed = Number(this.config.MAX_SPEED) || 155;
 
       const fullSlowdownDeg = Math.max(
         8,
@@ -833,7 +833,7 @@
 
       const maxCorrection = Math.max(
         10,
-        Number(this.config.MAX_STEERING_CORRECTION) || 65
+        Number(this.config.MAX_STEERING_CORRECTION) || 60
       );
 
       // Với hộp số 1/120, khi baseSpeed đã giảm ở cua thì steering cũng
@@ -847,7 +847,7 @@
         0,
         Number.isFinite(configuredMinForwardForLimit)
           ? configuredMinForwardForLimit
-          : 6
+          : 4
       );
       const speedAwareMaxCorrection = Math.max(
         10,
@@ -869,8 +869,8 @@
       // ===================================================
       // correction < 0 -> Left chậm, Right nhanh -> cua trái
       // correction > 0 -> Left nhanh, Right chậm -> cua phải
-      // LINE_FOLLOW không reverse bánh trong. Bánh trong được giảm tốc ở
-      // thang logic, sau đó tầng PWM sẽ bảo đảm torque floor để bánh vẫn lăn.
+      // Hộp số 1/120 đã đủ mô-men: khi bám line chỉ cần giảm bánh trong,
+      // không reverse bánh trong vì reverse dễ làm xe giật và quá lái.
       const configuredMinForward = Number(
         this.config.LINE_FOLLOW_MIN_LOGICAL_SPEED
       );
@@ -878,7 +878,7 @@
         0,
         Number.isFinite(configuredMinForward)
           ? configuredMinForward
-          : 6
+          : 4
       );
 
       const leftTarget = this.clamp(
@@ -1040,7 +1040,7 @@
 
       const base = Math.min(
         88,
-        Number(this.config.BASE_SPEED) || 94
+        Number(this.config.BASE_SPEED) || 92
       );
 
       const positionKp = Number(this.config.POSITION_KP) || 0.075;
@@ -1181,7 +1181,7 @@
 
       const maxSpeed = Math.max(
         1,
-        Number(this.config.MAX_SPEED) || 160
+        Number(this.config.MAX_SPEED) || 155
       );
 
       nextLeft = this.clamp(nextLeft, -maxSpeed, maxSpeed);
@@ -1257,14 +1257,13 @@
     // Khác bản cũ: không ép cả hai bánh luôn >= MOTOR_CRUISE_PWM.
     // Mỗi bánh được map độc lập theo magnitude logic:
     //
+    //   logical rất nhỏ ở bánh trong cua -> 0 (coast, chỉ LINE_FOLLOW)
     //   logical nhỏ          -> MOTOR_MIN_RUN_PWM
     //   logical = BASE_SPEED -> MOTOR_CRUISE_PWM
     //   logical = MAX_SPEED  -> MOTOR_MAX_PWM
     //
-    // Sau mapping, LINE_FOLLOW / REACQUIRE_LINE áp dụng torque floor:
-    // bánh trong không được tụt xuống vùng có điện nhưng không đủ mô-men.
-    // Nếu phải nâng bánh trong, bánh ngoài cũng được nâng tương ứng để
-    // giữ độ chênh steering. TURNING không dùng torque floor.
+    // Vì vậy khi cua, bánh trong thực sự giảm tốc và curve slowdown thực sự
+    // làm cả xe chậm lại. Đây phù hợp hơn khi hộp số 1/120 đã đủ mô-men.
     // =====================================================
 
     mapMotorPairToPwm(left, right, boostActive = false) {
@@ -1273,13 +1272,56 @@
         Number(this.config.MOTOR_ZERO_CUTOFF_LOGICAL) || 0.5
       );
 
-      const leftValue =
-        Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
-      const rightValue =
-        Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
+      let leftValue = Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
+      let rightValue = Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
 
       if (leftValue === 0 && rightValue === 0) {
         return { left: 0, right: 0 };
+      }
+
+      // ---------------------------------------------------
+      // INNER-WHEEL COAST - chỉ dùng khi đang LINE_FOLLOW.
+      //
+      // Vấn đề thực tế với hộp số 1/120:
+      // controller có thể yêu cầu logical 4..10 cho bánh trong cua,
+      // nhưng mapping cũ lại ép bánh đó lên MOTOR_MIN_RUN_PWM (~60),
+      // khiến cả hai bên vẫn kéo mạnh và xe gần như đi thẳng.
+      //
+      // Khi một bánh rất chậm và bánh còn lại nhanh hơn đủ nhiều,
+      // cho bánh trong về 0 để tạo moment quay rõ ràng.
+      // Không áp dụng trong TURNING nên quay gyro -PWM/+PWM vẫn giữ nguyên.
+      // ---------------------------------------------------
+      if (this.state === NAV_STATE.LINE_FOLLOW) {
+        const coastThreshold = Math.max(
+          0,
+          Number(this.config.INNER_WHEEL_COAST_LOGICAL) || 16
+        );
+        const coastMinGap = Math.max(
+          0,
+          Number(this.config.INNER_WHEEL_COAST_MIN_GAP_LOGICAL) || 24
+        );
+
+        const sameForwardDirection = leftValue >= 0 && rightValue >= 0;
+
+        if (sameForwardDirection) {
+          const leftMag = Math.abs(leftValue);
+          const rightMag = Math.abs(rightValue);
+
+          if (
+            leftMag > 0 &&
+            leftMag <= coastThreshold &&
+            rightMag - leftMag >= coastMinGap
+          ) {
+            leftValue = 0;
+          }
+          else if (
+            rightMag > 0 &&
+            rightMag <= coastThreshold &&
+            leftMag - rightMag >= coastMinGap
+          ) {
+            rightValue = 0;
+          }
+        }
       }
 
       const minRunPwm = this.clamp(
@@ -1289,13 +1331,13 @@
       );
 
       const cruisePwm = this.clamp(
-        Number(this.config.MOTOR_CRUISE_PWM) || 98,
+        Number(this.config.MOTOR_CRUISE_PWM) || 92,
         minRunPwm,
         254
       );
 
       const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 160,
+        Number(this.config.MOTOR_MAX_PWM) || 155,
         cruisePwm,
         255
       );
@@ -1319,164 +1361,14 @@
         maxPwm
       );
 
-      // ---------------------------------------------------
-      // FORWARD TORQUE FLOOR + MINIMUM STEERING GAP
-      // ---------------------------------------------------
-      // Mục tiêu:
-      // 1) Bánh trong cua không được rơi xuống vùng PWM thiếu mô-men.
-      // 2) Sau khi nâng bánh trong lên torque floor, vẫn phải giữ đủ chênh
-      //    PWM để chassis 4 bánh có thể thắng ma sát ngang và thực sự rẽ.
-      // 3) Áp dụng đối xứng cho cả rẽ trái và rẽ phải.
-      // 4) Không áp dụng trong TURNING vì TURNING cần -PWM/+PWM để pivot.
-      // ---------------------------------------------------
-      const forwardTrackingState =
-        this.state === NAV_STATE.LINE_FOLLOW ||
-        this.state === NAV_STATE.REACQUIRE_LINE;
-
-      if (
-        forwardTrackingState &&
-        leftPwm > 0 &&
-        rightPwm > 0
-      ) {
-        const torqueFloor = this.clamp(
-          Number(this.config.LINE_FOLLOW_TORQUE_FLOOR_PWM) || 65,
-          minRunPwm,
-          maxPwm
-        );
-
-        // Dùng chênh tốc độ LOGIC để xác định hướng và độ gắt của cua.
-        // leftValue < rightValue -> cua trái.
-        // rightValue < leftValue -> cua phải.
-        const logicalGap = Math.abs(leftValue - rightValue);
-
-        const gapActivate = Math.max(
-          0,
-          Number(this.config.STEERING_GAP_ACTIVATE_LOGICAL) || 12
-        );
-        const mediumLogical = Math.max(
-          gapActivate,
-          Number(this.config.STEERING_GAP_MEDIUM_LOGICAL) || 32
-        );
-        const strongLogical = Math.max(
-          mediumLogical,
-          Number(this.config.STEERING_GAP_STRONG_LOGICAL) || 64
-        );
-
-        const lightGap = Math.max(
-          0,
-          Number(this.config.MIN_TURN_PWM_GAP_LIGHT) || 28
-        );
-        const mediumGap = Math.max(
-          lightGap,
-          Number(this.config.MIN_TURN_PWM_GAP_MEDIUM) || 38
-        );
-        const strongGap = Math.max(
-          mediumGap,
-          Number(this.config.MIN_TURN_PWM_GAP_STRONG) || 48
-        );
-
-        let requiredGap = 0;
-        if (logicalGap >= strongLogical) {
-          requiredGap = strongGap;
-        }
-        else if (logicalGap >= mediumLogical) {
-          requiredGap = mediumGap;
-        }
-        else if (logicalGap >= gapActivate) {
-          requiredGap = lightGap;
-        }
-
-        if (leftValue < rightValue) {
-          // RẼ TRÁI: Left = bánh trong, Right = bánh ngoài.
-          if (leftPwm < torqueFloor) {
-            const deficit = torqueFloor - leftPwm;
-            leftPwm = torqueFloor;
-            rightPwm = Math.min(maxPwm, rightPwm + deficit);
-          }
-
-          const currentGap = rightPwm - leftPwm;
-          if (requiredGap > 0 && currentGap < requiredGap) {
-            let missing = requiredGap - currentGap;
-
-            // Ưu tiên tăng bánh ngoài để giữ mô-men bánh trong.
-            const outerHeadroom = maxPwm - rightPwm;
-            const addOuter = Math.min(missing, outerHeadroom);
-            rightPwm += addOuter;
-            missing -= addOuter;
-
-            // Nếu bánh ngoài đã chạm max, mới giảm bánh trong nhưng không
-            // bao giờ thấp hơn torque floor.
-            if (missing > 0) {
-              leftPwm = Math.max(torqueFloor, leftPwm - missing);
-            }
-          }
-        }
-        else if (rightValue < leftValue) {
-          // RẼ PHẢI: Right = bánh trong, Left = bánh ngoài.
-          if (rightPwm < torqueFloor) {
-            const deficit = torqueFloor - rightPwm;
-            rightPwm = torqueFloor;
-            leftPwm = Math.min(maxPwm, leftPwm + deficit);
-          }
-
-          const currentGap = leftPwm - rightPwm;
-          if (requiredGap > 0 && currentGap < requiredGap) {
-            let missing = requiredGap - currentGap;
-
-            const outerHeadroom = maxPwm - leftPwm;
-            const addOuter = Math.min(missing, outerHeadroom);
-            leftPwm += addOuter;
-            missing -= addOuter;
-
-            if (missing > 0) {
-              rightPwm = Math.max(torqueFloor, rightPwm - missing);
-            }
-          }
-        }
-        else if (leftPwm < torqueFloor || rightPwm < torqueFloor) {
-          // Đi thẳng tốc độ thấp: nếu đã chạy thì cả hai bên phải đủ mô-men.
-          leftPwm = Math.max(leftPwm, torqueFloor);
-          rightPwm = Math.max(rightPwm, torqueFloor);
-        }
-      }
-
-      // ---------------------------------------------------
-      // MOTOR TRIM - để hiệu chuẩn sai số motor/driver/nguồn thực tế.
-      // Mặc định 1.00/1.00 nên không thay đổi hành vi cho tới khi bạn tune.
-      // ---------------------------------------------------
-      const leftTrimRaw = Number(this.config.LEFT_MOTOR_TRIM);
-      const rightTrimRaw = Number(this.config.RIGHT_MOTOR_TRIM);
-      const leftTrim = Number.isFinite(leftTrimRaw)
-        ? this.clamp(leftTrimRaw, 0.80, 1.20)
-        : 1.00;
-      const rightTrim = Number.isFinite(rightTrimRaw)
-        ? this.clamp(rightTrimRaw, 0.80, 1.20)
-        : 1.00;
-
-      if (leftPwm !== 0) {
-        leftPwm = Math.sign(leftPwm) * Math.round(
-          this.clamp(Math.abs(leftPwm) * leftTrim, 0, maxPwm)
-        );
-      }
-
-      if (rightPwm !== 0) {
-        rightPwm = Math.sign(rightPwm) * Math.round(
-          this.clamp(Math.abs(rightPwm) * rightTrim, 0, maxPwm)
-        );
-      }
-
-      // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá hướng.
-      // Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
+      // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá chênh lệch
+      // trái/phải. Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
       if (boostActive) {
         if (leftPwm !== 0) {
-          leftPwm =
-            Math.sign(leftPwm) *
-            Math.max(Math.abs(leftPwm), boostPwm);
+          leftPwm = Math.sign(leftPwm) * Math.max(Math.abs(leftPwm), boostPwm);
         }
         if (rightPwm !== 0) {
-          rightPwm =
-            Math.sign(rightPwm) *
-            Math.max(Math.abs(rightPwm), boostPwm);
+          rightPwm = Math.sign(rightPwm) * Math.max(Math.abs(rightPwm), boostPwm);
         }
       }
 
@@ -1492,11 +1384,11 @@
 
       const logicalBase = Math.max(
         1,
-        Number(this.config.BASE_SPEED) || 94
+        Number(this.config.BASE_SPEED) || 92
       );
       const logicalMax = Math.max(
         logicalBase + 1,
-        Number(this.config.MAX_SPEED) || 160
+        Number(this.config.MAX_SPEED) || 155
       );
 
       let pwm;
@@ -1540,7 +1432,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-precision-v5-torque-gap";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-precision-v2";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;
