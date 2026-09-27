@@ -245,6 +245,9 @@
           <div><span>Target curvature κ</span><b id="visionTargetCurvatureState">0</b></div>
           <div><span>Turn ratio</span><b id="visionTurnRatioState">0</b></div>
           <div><span>Adaptive look-ahead</span><b id="visionAdaptiveLookaheadState">0</b></div>
+          <div><span>Bán kính cua</span><b id="visionCurveRadiusState">∞</b></div>
+          <div><span>Kinematic turn</span><b id="visionKinematicTurnState">geo 0 · fb 0</b></div>
+          <div><span>Lane tracker</span><b id="visionLaneGateState">ACQUIRING</b></div>
 
           <div><span>QR</span><b id="visionQrState">-</b></div>
           <div><span>QR diện tích</span><b id="visionQrAreaState">-</b></div>
@@ -256,7 +259,7 @@
           <div><span>Firmware ESP32</span><b id="visionFirmwareBuildState">chưa nhận</b></div>
           <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
           <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
-          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Web BEV Curvature V2 · Tangent Intent · Camera Only · 4-Motor</b></div>
+          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · BEV Curvature V3 · Lane Lock · Track15/Lane26</b></div>
           <div><span>Config / Vision / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
@@ -456,6 +459,18 @@
             <b id="adaptiveLookaheadState">0</b>
           </div>
           <div>
+            <span>Bán kính cua ước lượng</span>
+            <b id="curveRadiusState">∞</b>
+          </div>
+          <div>
+            <span>Kinematic turn</span>
+            <b id="kinematicTurnState">geo 0 · fb 0</b>
+          </div>
+          <div>
+            <span>Lane tracker</span>
+            <b id="laneGateState">ACQUIRING</b>
+          </div>
+          <div>
             <span>Lý do motor</span>
             <b id="motorReasonState">WAITING_TASK</b>
           </div>
@@ -465,7 +480,7 @@
           </div>
           <div>
             <span>Source build</span>
-            <b id="sourceBuildState">2026-09-27 · Web BEV Curvature V2 · Tangent Intent · Camera Only · 4-Motor</b>
+            <b id="sourceBuildState">2026-09-27 · BEV Curvature V3 · Lane Lock · Track15/Lane26</b>
           </div>
           <div>
             <span>Config / Vision / Navigation</span>
@@ -683,20 +698,20 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
+<script src="config.js?v=20260927-bev-v3-track15-lane26"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
-<script src="audio.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="gemini-live.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="mqtt-robot.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="orientation.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="vision.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="navigation.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="app.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
-<script src="robot-control.js?v=20260927-bev-curvature-v2-tangent-intent"></script>
+<script src="audio.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="gemini-live.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="mqtt-robot.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="orientation.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="vision.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="navigation.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="app.js?v=20260927-bev-v3-track15-lane26"></script>
+<script src="robot-control.js?v=20260927-bev-v3-track15-lane26"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL

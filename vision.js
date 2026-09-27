@@ -72,6 +72,15 @@
       this.prevBevTargetCurvature = 0;
       this.prevBevLookaheadU = null;
 
+      // Lane-lock state: prevents a dark object from instantly replacing lane.
+      this.laneTrackerLocked = false;
+      this.laneRejectFrames = 0;
+      this.pendingLaneFrames = 0;
+      this.pendingLeftCurve = null;
+      this.pendingRightCurve = null;
+      this.lastLaneGateReason = "ACQUIRING";
+      this.lastLaneGateQuality = 0;
+
       if (
         "BarcodeDetector" in window &&
         typeof window.BarcodeDetector === "function"
@@ -285,6 +294,15 @@
       this.lostFrames = 0;
       this.prevBevTargetCurvature = 0;
       this.prevBevLookaheadU = null;
+
+      this.laneTrackerLocked = false;
+      this.laneRejectFrames = 0;
+      this.pendingLaneFrames = 0;
+      this.pendingLeftCurve = null;
+      this.pendingRightCurve = null;
+      this.lastLaneGateReason = "ACQUIRING";
+      this.lastLaneGateQuality = 0;
+
       this.lastFrame = null;
     }
 
@@ -984,6 +1002,295 @@
     }
 
 
+
+    meanLaneInnovation(
+      leftCurve,
+      rightCurve,
+      referenceLeft,
+      referenceRight,
+      farT,
+      nearT
+    ) {
+      if (
+        !leftCurve || !rightCurve ||
+        !referenceLeft || !referenceRight
+      ) {
+        return 0;
+      }
+
+      let sum = 0;
+      let count = 0;
+
+      for (let i = 0; i < 7; i++) {
+        const t = farT + (nearT - farT) * i / 6;
+
+        const left = this.evalCurve(leftCurve, t);
+        const right = this.evalCurve(rightCurve, t);
+        const refLeft = this.evalCurve(referenceLeft, t);
+        const refRight = this.evalCurve(referenceRight, t);
+        const laneWidth = Math.max(1, right - left);
+
+        if (
+          Number.isFinite(left) &&
+          Number.isFinite(right) &&
+          Number.isFinite(refLeft) &&
+          Number.isFinite(refRight)
+        ) {
+          sum += (
+            Math.abs(left - refLeft) +
+            Math.abs(right - refRight)
+          ) / (2 * laneWidth);
+          count++;
+        }
+      }
+
+      return count ? sum / count : Infinity;
+    }
+
+    validateObservedLanePair({
+      leftCurve,
+      rightCurve,
+      leftFit,
+      rightFit,
+      width,
+      farT,
+      nearT,
+      pairedRows,
+      scanRows,
+      compareTemporal = true
+    }) {
+      if (!leftCurve || !rightCurve) {
+        return {
+          valid: false,
+          quality: 0,
+          reason: "NO_PAIR",
+          innovation: Infinity
+        };
+      }
+
+      const laneMin =
+        width * (Number(this.config.VISION_LANE_WIDTH_MIN_RATIO) || 0.16);
+      const laneMax =
+        width * (Number(this.config.VISION_LANE_WIDTH_MAX_RATIO) || 0.88);
+
+      const maxRms = Math.max(
+        5,
+        Number(this.config.VISION_PAIR_MAX_FIT_RMS_PX) || 17
+      );
+
+      if (
+        Number(leftFit?.curve?.rms || 0) > maxRms ||
+        Number(rightFit?.curve?.rms || 0) > maxRms
+      ) {
+        return {
+          valid: false,
+          quality: 0,
+          reason: "FIT_RMS",
+          innovation: Infinity
+        };
+      }
+
+      const minCoverage = this.clamp(
+        Number(this.config.VISION_PAIR_MIN_COVERAGE) || 0.34,
+        0.15,
+        0.90
+      );
+
+      const coverage =
+        pairedRows / Math.max(1, scanRows);
+
+      if (coverage < minCoverage) {
+        return {
+          valid: false,
+          quality: coverage,
+          reason: "LOW_PAIR_COVERAGE",
+          innovation: Infinity
+        };
+      }
+
+      const widths = [];
+      const centers = [];
+
+      for (let i = 0; i < 9; i++) {
+        const t = farT + (nearT - farT) * i / 8;
+        const left = this.evalCurve(leftCurve, t);
+        const right = this.evalCurve(rightCurve, t);
+
+        if (
+          !Number.isFinite(left) ||
+          !Number.isFinite(right) ||
+          right <= left
+        ) {
+          return {
+            valid: false,
+            quality: 0,
+            reason: "CROSSED_LINES",
+            innovation: Infinity
+          };
+        }
+
+        const laneWidth = right - left;
+        if (laneWidth < laneMin || laneWidth > laneMax) {
+          return {
+            valid: false,
+            quality: 0,
+            reason: "WIDTH_RANGE",
+            innovation: Infinity
+          };
+        }
+
+        widths.push(laneWidth);
+        centers.push((left + right) / 2);
+      }
+
+      const farWidth = widths[0];
+      const nearWidth = widths[widths.length - 1];
+
+      const perspectiveMin = this.clamp(
+        Number(this.config.VISION_PERSPECTIVE_MIN_NEAR_FAR_WIDTH_RATIO) || 0.82,
+        0.55,
+        1.20
+      );
+
+      if (nearWidth < farWidth * perspectiveMin) {
+        return {
+          valid: false,
+          quality: 0.15,
+          reason: "BAD_PERSPECTIVE",
+          innovation: Infinity
+        };
+      }
+
+      // Reject abrupt width saw-tooth. Real lane perspective changes smoothly.
+      let widthViolations = 0;
+      for (let i = 1; i < widths.length; i++) {
+        const ratio = widths[i] / Math.max(1, widths[i - 1]);
+        if (ratio < 0.72 || ratio > 1.42) {
+          widthViolations++;
+        }
+      }
+
+      if (widthViolations >= 2) {
+        return {
+          valid: false,
+          quality: 0.20,
+          reason: "WIDTH_JUMP",
+          innovation: Infinity
+        };
+      }
+
+      const nearCenter = centers[centers.length - 1];
+      const centerOffsetLane =
+        Math.abs(nearCenter - width / 2) /
+        Math.max(1, nearWidth);
+
+      const acquireMaxOffset = this.clamp(
+        Number(this.config.VISION_ACQUIRE_CENTER_MAX_OFFSET_LANES) || 0.42,
+        0.15,
+        0.90
+      );
+
+      if (
+        !this.laneTrackerLocked &&
+        centerOffsetLane > acquireMaxOffset
+      ) {
+        return {
+          valid: false,
+          quality: 0.15,
+          reason: "ACQUIRE_OFFCENTER",
+          innovation: Infinity
+        };
+      }
+
+      const innovation = compareTemporal
+        ? this.meanLaneInnovation(
+            leftCurve,
+            rightCurve,
+            this.prevLeftCurve,
+            this.prevRightCurve,
+            farT,
+            nearT
+          )
+        : 0;
+
+      const maxInnovation = this.clamp(
+        Number(this.config.VISION_PAIR_MAX_TEMPORAL_INNOVATION_LANES) || 0.22,
+        0.06,
+        0.60
+      );
+
+      if (
+        this.laneTrackerLocked &&
+        Number.isFinite(innovation) &&
+        innovation > maxInnovation
+      ) {
+        return {
+          valid: false,
+          quality: this.clamp(1 - innovation, 0, 0.4),
+          reason: "TEMPORAL_JUMP",
+          innovation
+        };
+      }
+
+      const fitQuality = this.clamp(
+        1 -
+        (
+          Number(leftFit?.curve?.rms || 0) +
+          Number(rightFit?.curve?.rms || 0)
+        ) / (2 * maxRms),
+        0,
+        1
+      );
+
+      const temporalQuality =
+        Number.isFinite(innovation)
+          ? this.clamp(
+              1 - innovation / Math.max(0.001, maxInnovation),
+              0,
+              1
+            )
+          : 0.5;
+
+      const quality = this.clamp(
+        coverage * 0.42 +
+        fitQuality * 0.30 +
+        (this.laneTrackerLocked ? temporalQuality : 0.75) * 0.28,
+        0,
+        1
+      );
+
+      return {
+        valid: true,
+        quality,
+        reason: this.laneTrackerLocked ? "LOCKED_OK" : "ACQUIRE_OK",
+        innovation
+      };
+    }
+
+    lanePairSimilar(
+      leftA,
+      rightA,
+      leftB,
+      rightB,
+      farT,
+      nearT
+    ) {
+      if (!leftA || !rightA || !leftB || !rightB) {
+        return false;
+      }
+
+      const innovation = this.meanLaneInnovation(
+        leftA,
+        rightA,
+        leftB,
+        rightB,
+        farT,
+        nearT
+      );
+
+      return Number.isFinite(innovation) && innovation <= 0.16;
+    }
+
     buildVirtualBevGeometry({
       centerCurve,
       leftCurve,
@@ -1005,22 +1312,34 @@
       );
 
       const samples = Math.max(
-        7,
+        9,
         Math.round(Number(this.config.VISION_BEV_SAMPLES) || 11)
       );
 
-      const xScale = this.clamp(
-        Number(this.config.VISION_BEV_X_SCALE) || 0.55,
-        0.20,
-        1.20
+      const frameCenter = width / 2;
+
+      const nearLeft = this.evalCurve(leftCurve, nearT);
+      const nearRight = this.evalCurve(rightCurve, nearT);
+      const nearLaneWidth = nearRight - nearLeft;
+
+      if (
+        !Number.isFinite(nearLaneWidth) ||
+        nearLaneWidth < width * 0.08
+      ) {
+        return null;
+      }
+
+      const nearDistanceLanes = this.clamp(
+        Number(this.config.VISION_GROUND_NEAR_DISTANCE_LANES) || 0.60,
+        0.15,
+        2.50
       );
 
-      const frameCenter = width / 2;
       const points = [];
 
       for (let i = 0; i < samples; i++) {
-        const u = i / (samples - 1);
-        const t = nearT - u * (nearT - farT);
+        const imageFraction = i / (samples - 1);
+        const t = nearT - imageFraction * (nearT - farT);
 
         const leftX = this.evalCurve(leftCurve, t);
         const rightX = this.evalCurve(rightCurve, t);
@@ -1037,15 +1356,46 @@
           continue;
         }
 
-        // Perspective-normalized lateral coordinate.
-        // xLane=1 means one full observed lane-width to the right.
-        const xLane = (centerX - frameCenter) / laneWidth;
-        const xMetric = xLane * xScale;
+        // Lateral coordinate in lane-width units.
+        const xLane =
+          (centerX - frameCenter) /
+          laneWidth;
 
-        points.push({ t: u, x: xMetric, xLane, imageT: t, imageX: centerX });
+        // Ground-plane approximation from perspective:
+        // image lane width ~ constant / distance.
+        // Therefore Z/Znear ~= nearLaneWidth/laneWidth.
+        //
+        // zLane = forward distance from near sample, in lane-width units.
+        const distanceRatio =
+          nearLaneWidth / laneWidth;
+
+        const zLane =
+          nearDistanceLanes *
+          Math.max(0, distanceRatio - 1);
+
+        points.push({
+          t: zLane,
+          x: xLane,
+          xLane,
+          zLane,
+          imageT: t,
+          imageX: centerX,
+          laneWidth
+        });
       }
 
-      if (points.length < 5) {
+      if (points.length < 6) {
+        return null;
+      }
+
+      const zMax = Math.max(...points.map((p) => p.zLane));
+
+      const minForwardSpan = Math.max(
+        0.15,
+        Number(this.config.VISION_GROUND_MIN_FORWARD_SPAN_LANES) || 0.45
+      );
+
+      if (!Number.isFinite(zMax) || zMax < minForwardSpan) {
         return null;
       }
 
@@ -1054,18 +1404,32 @@
         return null;
       }
 
-      const localProbeU = 0.08;
-      const localDerivative = this.curveDerivative(fit, localProbeU);
-      const localHeadingDeg = Math.atan(localDerivative) * 180 / Math.PI;
+      const localProbeZ =
+        Math.min(
+          zMax * 0.12,
+          Math.max(0.05, minForwardSpan * 0.20)
+        );
 
-      const secondDerivative = 2 * fit.a;
+      const localDerivative =
+        this.curveDerivative(fit, localProbeZ);
+
+      const localHeadingDeg =
+        Math.atan(localDerivative) *
+        180 / Math.PI;
+
+      const secondDerivative =
+        2 * fit.a;
+
       const provisionalCurvature =
         secondDerivative /
-        Math.pow(1 + localDerivative * localDerivative, 1.5);
+        Math.pow(
+          1 + localDerivative * localDerivative,
+          1.5
+        );
 
       const curvatureFull = Math.max(
-        0.25,
-        Number(this.config.VISION_BEV_CURVATURE_FULL) || 1.35
+        0.20,
+        Number(this.config.VISION_BEV_CURVATURE_FULL) || 1.20
       );
 
       const headingFull = Math.max(
@@ -1073,8 +1437,6 @@
         Number(this.config.VISION_BEV_HEADING_FULL_DEG) || 18
       );
 
-      // Initial severity is based on the actual path shape, not on where
-      // the path happens to sit relative to the camera center.
       const provisionalSeverity = this.clamp(
         Math.max(
           Math.abs(provisionalCurvature) / curvatureFull,
@@ -1098,7 +1460,8 @@
 
       const rawLookaheadU =
         farLookaheadU -
-        provisionalSeverity * (farLookaheadU - nearLookaheadU);
+        provisionalSeverity *
+        (farLookaheadU - nearLookaheadU);
 
       const lookaheadAlpha = this.clamp(
         Number(this.config.VISION_BEV_LOOKAHEAD_EMA_ALPHA) || 0.38,
@@ -1108,58 +1471,64 @@
 
       const lookaheadU = Number.isFinite(this.prevBevLookaheadU)
         ? this.prevBevLookaheadU +
-          lookaheadAlpha * (rawLookaheadU - this.prevBevLookaheadU)
+          lookaheadAlpha *
+          (rawLookaheadU - this.prevBevLookaheadU)
         : rawLookaheadU;
 
       this.prevBevLookaheadU = lookaheadU;
 
-      // ----------------------------------------------------
-      // DESIRED TANGENT
-      // ----------------------------------------------------
-      // u=0 is near the robot, u increases forward.
-      // x increases to image/right side.
-      // Therefore:
-      //   desiredTangentDeg < 0 => path wants LEFT
-      //   desiredTangentDeg > 0 => path wants RIGHT
+      const lookaheadZ =
+        this.clamp(
+          lookaheadU * zMax,
+          localProbeZ,
+          zMax
+        );
+
       const desiredDerivative =
-        this.curveDerivative(fit, lookaheadU);
+        this.curveDerivative(fit, lookaheadZ);
 
       const desiredTangentDeg =
-        Math.atan(desiredDerivative) * 180 / Math.PI;
+        Math.atan(desiredDerivative) *
+        180 / Math.PI;
 
-      const previewDeltaU = Math.max(
-        0.08,
-        lookaheadU - localProbeU
-      );
+      const previewDeltaZ =
+        Math.max(
+          0.08,
+          lookaheadZ - localProbeZ
+        );
 
       const previewHeadingDeltaDeg =
-        desiredTangentDeg - localHeadingDeg;
+        desiredTangentDeg -
+        localHeadingDeg;
 
       const previewHeadingCurvature =
-        (previewHeadingDeltaDeg * Math.PI / 180) /
-        previewDeltaU;
+        (
+          previewHeadingDeltaDeg *
+          Math.PI / 180
+        ) /
+        previewDeltaZ;
 
-      // Polynomial curvature at the control/look-ahead point.
       const geometryCurvature =
         secondDerivative /
         Math.pow(
-          1 + desiredDerivative * desiredDerivative,
+          1 +
+          desiredDerivative *
+          desiredDerivative,
           1.5
         );
 
-      // Pure pursuit is retained ONLY as a diagnostic position-correction
-      // value. It no longer determines left/right curve intent.
-      const targetX = this.evalCurve(fit, lookaheadU);
-      const lookaheadSq = Math.max(
-        0.02,
-        lookaheadU * lookaheadU
-      );
+      const targetX =
+        this.evalCurve(
+          fit,
+          lookaheadZ
+        );
 
       const purePursuitCurvature =
         2 * targetX /
         Math.max(
           0.025,
-          targetX * targetX + lookaheadSq
+          targetX * targetX +
+          lookaheadZ * lookaheadZ
         );
 
       const geoWeight = this.clamp(
@@ -1174,26 +1543,25 @@
         1
       );
 
-      const weightSum = Math.max(
-        0.001,
-        geoWeight + previewWeight
-      );
+      const weightSum =
+        Math.max(
+          0.001,
+          geoWeight + previewWeight
+        );
 
-      // CRITICAL V2 CHANGE:
-      // Curve direction comes only from path shape:
-      //   geometry curvature + change in tangent heading.
-      // Lateral offset / pure-pursuit target X cannot flip its sign.
+      // Curvature is now approximately in 1 / lane-width.
       const rawTargetCurvature =
         (
           geometryCurvature * geoWeight +
           previewHeadingCurvature * previewWeight
-        ) / weightSum;
+        ) /
+        weightSum;
 
       const severity = this.clamp(
         Math.max(
           Math.abs(rawTargetCurvature) / curvatureFull,
           Math.abs(desiredTangentDeg) / headingFull,
-          provisionalSeverity * 0.75
+          provisionalSeverity * 0.72
         ),
         0,
         1
@@ -1220,31 +1588,40 @@
       const isFalling =
         sameDirection &&
         Math.abs(rawTargetCurvature) <
-          Math.abs(previous);
+        Math.abs(previous);
 
       const alpha =
-        isFalling ? fallAlpha : riseAlpha;
+        isFalling
+          ? fallAlpha
+          : riseAlpha;
 
       const targetCurvature =
         previous +
         alpha *
-          (rawTargetCurvature - previous);
+        (rawTargetCurvature - previous);
 
       this.prevBevTargetCurvature =
         targetCurvature;
 
-      const lateralMetric = this.evalCurve(fit, 0);
-      const lateralLane = lateralMetric / Math.max(0.001, xScale);
+      const lateralLane =
+        this.evalCurve(fit, 0);
 
-      // Convert adaptive u back to image t only for overlay/debug.
-      const adaptiveImageT = nearT - lookaheadU * (nearT - farT);
-      const adaptiveImageX = this.evalCurve(centerCurve, adaptiveImageT);
+      // Overlay point: use normalized fraction only for image position.
+      const adaptiveImageT =
+        nearT -
+        lookaheadU *
+        (nearT - farT);
+
+      const adaptiveImageX =
+        this.evalCurve(
+          centerCurve,
+          adaptiveImageT
+        );
 
       return {
         curve: fit,
         points,
         farT,
-        xScale,
         lateralLane,
         localHeadingDeg,
         desiredTangentDeg,
@@ -1257,16 +1634,10 @@
         targetCurvature,
         severity,
         lookaheadU,
+        lookaheadZ,
+        groundForwardSpanLanes: zMax,
         adaptiveImageT,
-        adaptiveImageX,
-
-        // Tangent in IMAGE coordinates at the adaptive point.
-        // Used only for drawing the short yellow desired-camera guide.
-        desiredImageTangentDeg:
-          Math.atan2(
-            -this.curveDerivative(centerCurve, adaptiveImageT),
-            Math.max(1, width)
-          ) * 180 / Math.PI
+        adaptiveImageX
       };
     }
 
@@ -1420,7 +1791,19 @@
           expectedWidth = lastPairWidth;
         }
 
-        const margin = baseMargin * (1 + (1 - t) * 0.35);
+        const lockedMargin = Math.max(
+          12,
+          Number(this.config.VISION_LOCKED_SEARCH_MARGIN_PX) || 32
+        ) * (width / 480);
+
+        const effectiveBaseMargin =
+          this.laneTrackerLocked
+            ? Math.min(baseMargin, lockedMargin)
+            : baseMargin;
+
+        const margin =
+          effectiveBaseMargin *
+          (1 + (1 - t) * 0.28);
 
         const pair = this.choosePair({
           candidates,
@@ -1530,16 +1913,174 @@
         Number(this.config.VISION_MIN_POINTS_PER_SIDE) || 5
       );
 
-      const leftFound =
+      let leftFound =
         Boolean(rawLeftCurve) &&
         (leftFit?.points?.length || 0) >= minPoints;
 
-      const rightFound =
+      let rightFound =
         Boolean(rawRightCurve) &&
         (rightFit?.points?.length || 0) >= minPoints;
 
-      const hasBothLines = leftFound && rightFound;
-      const hasAnyObservedLine = leftFound || rightFound;
+      let hasBothLines = leftFound && rightFound;
+      let hasAnyObservedLine = leftFound || rightFound;
+
+      // ===================================================
+      // LANE LOCK / FRAME GATE
+      // ===================================================
+      const gateNearT = this.clamp(
+        Number(this.config.VISION_NEAR_Y_RATIO) || 0.88,
+        0.55,
+        0.98
+      );
+
+      const gateFarT = this.clamp(
+        Number(this.config.VISION_BEV_FAR_T_RATIO) || 0.18,
+        0.06,
+        gateNearT - 0.22
+      );
+
+      let laneGate = {
+        valid: true,
+        quality: 0,
+        reason: this.laneTrackerLocked ? "LOCKED" : "ACQUIRING",
+        innovation: 0
+      };
+
+      const laneLockEnabled =
+        this.config.VISION_LANE_LOCK_ENABLE !== false;
+
+      if (laneLockEnabled && hasBothLines) {
+        laneGate = this.validateObservedLanePair({
+          leftCurve: rawLeftCurve,
+          rightCurve: rawRightCurve,
+          leftFit,
+          rightFit,
+          width,
+          farT: gateFarT,
+          nearT: gateNearT,
+          pairedRows,
+          scanRows,
+          compareTemporal: this.laneTrackerLocked
+        });
+
+        if (this.laneTrackerLocked) {
+          if (!laneGate.valid) {
+            this.laneRejectFrames += 1;
+            this.lastLaneGateReason = laneGate.reason;
+            this.lastLaneGateQuality = laneGate.quality;
+
+            // Reject this frame's newly detected pair.
+            // The short prediction branch below may temporarily reuse
+            // the previously locked lane instead.
+            rawLeftCurve = null;
+            rawRightCurve = null;
+            leftFound = false;
+            rightFound = false;
+            hasBothLines = false;
+            hasAnyObservedLine = false;
+
+            const unlockFrames = Math.max(
+              2,
+              Number(this.config.VISION_LANE_REJECT_UNLOCK_FRAMES) || 5
+            );
+
+            if (this.laneRejectFrames >= unlockFrames) {
+              this.laneTrackerLocked = false;
+              this.pendingLaneFrames = 0;
+              this.pendingLeftCurve = null;
+              this.pendingRightCurve = null;
+
+              this.prevLeftCurve = null;
+              this.prevRightCurve = null;
+              this.prevLaneWidthCurve = null;
+              this.prevLaneWidthNear = null;
+
+              this.lastLaneGateReason = "REACQUIRE";
+            }
+          }
+          else {
+            this.laneRejectFrames = 0;
+            this.lastLaneGateReason = "LOCKED_OK";
+            this.lastLaneGateQuality = laneGate.quality;
+          }
+        }
+        else {
+          if (laneGate.valid) {
+            const similar = this.lanePairSimilar(
+              rawLeftCurve,
+              rawRightCurve,
+              this.pendingLeftCurve,
+              this.pendingRightCurve,
+              gateFarT,
+              gateNearT
+            );
+
+            if (similar) {
+              this.pendingLaneFrames += 1;
+            }
+            else {
+              this.pendingLaneFrames = 1;
+              this.pendingLeftCurve = { ...rawLeftCurve };
+              this.pendingRightCurve = { ...rawRightCurve };
+            }
+
+            const confirmFrames = Math.max(
+              1,
+              Number(this.config.VISION_LANE_ACQUIRE_CONFIRM_FRAMES) || 3
+            );
+
+            if (this.pendingLaneFrames >= confirmFrames) {
+              this.laneTrackerLocked = true;
+              this.laneRejectFrames = 0;
+              this.pendingLaneFrames = 0;
+              this.pendingLeftCurve = null;
+              this.pendingRightCurve = null;
+              this.lastLaneGateReason = "LOCKED_NEW";
+              this.lastLaneGateQuality = laneGate.quality;
+            }
+            else {
+              // Do not drive from an unconfirmed new pair.
+              rawLeftCurve = null;
+              rawRightCurve = null;
+              leftFound = false;
+              rightFound = false;
+              hasBothLines = false;
+              hasAnyObservedLine = false;
+              this.lastLaneGateReason =
+                `ACQUIRE_${this.pendingLaneFrames}`;
+              this.lastLaneGateQuality = laneGate.quality;
+            }
+          }
+          else {
+            this.pendingLaneFrames = 0;
+            this.pendingLeftCurve = null;
+            this.pendingRightCurve = null;
+
+            rawLeftCurve = null;
+            rawRightCurve = null;
+            leftFound = false;
+            rightFound = false;
+            hasBothLines = false;
+            hasAnyObservedLine = false;
+            this.lastLaneGateReason = laneGate.reason;
+            this.lastLaneGateQuality = laneGate.quality;
+          }
+        }
+      }
+      else if (
+        laneLockEnabled &&
+        !this.laneTrackerLocked &&
+        !hasBothLines
+      ) {
+        // Do not acquire a new lane from only one dark object.
+        rawLeftCurve = null;
+        rawRightCurve = null;
+        leftFound = false;
+        rightFound = false;
+        hasBothLines = false;
+        hasAnyObservedLine = false;
+        this.lastLaneGateReason = "NEED_TWO_LINES";
+      }
 
       let leftInferred = false;
       let rightInferred = false;
@@ -2085,6 +2626,13 @@
           this.prevControlCenter = null;
           this.prevLookAheadCenter = null;
           this.oneLineFrames = 0;
+
+          this.laneTrackerLocked = false;
+          this.laneRejectFrames = 0;
+          this.pendingLaneFrames = 0;
+          this.pendingLeftCurve = null;
+          this.pendingRightCurve = null;
+          this.lastLaneGateReason = "REACQUIRE";
         }
       }
 
@@ -2133,6 +2681,14 @@
         laneConfidence,
         pairCoverage,
 
+        laneGateState:
+          this.laneTrackerLocked
+            ? "LOCKED"
+            : "ACQUIRING",
+        laneGateReason: this.lastLaneGateReason,
+        laneGateQuality: this.lastLaneGateQuality,
+        laneRejectFrames: this.laneRejectFrames,
+
         rawLaneCenter: rawNearCenter,
         laneCenter,
         lookAheadCenter,
@@ -2173,6 +2729,8 @@
         targetCurvature: bevGeometry?.targetCurvature ?? null,
         bevSeverity: bevGeometry?.severity ?? null,
         adaptiveLookaheadU: bevGeometry?.lookaheadU ?? null,
+        groundLookaheadLanes: bevGeometry?.lookaheadZ ?? null,
+        groundForwardSpanLanes: bevGeometry?.groundForwardSpanLanes ?? null,
         adaptiveLookaheadT: bevGeometry?.adaptiveImageT ?? null,
         adaptiveLookaheadCenter: bevGeometry?.adaptiveImageX ?? null,
         desiredImageTangentDeg: bevGeometry?.desiredImageTangentDeg ?? null,
@@ -2523,7 +3081,8 @@
         `Lateral: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px`,
         `Camera axis: 0.0° · Yellow target ${lane.bevDesiredTangentDeg != null ? lane.bevDesiredTangentDeg.toFixed(1) : "-"}°`,
         `Near tangent: ${lane.bevNearHeadingDeg != null ? lane.bevNearHeadingDeg.toFixed(1) : "-"}° · preview Δ ${lane.bevPreviewHeadingDeltaDeg != null ? lane.bevPreviewHeadingDeltaDeg.toFixed(1) : "-"}°`,
-        `Path κ: ${lane.targetCurvature != null ? lane.targetCurvature.toFixed(2) : "-"} · PP(debug) ${lane.bevPurePursuitCurvature != null ? lane.bevPurePursuitCurvature.toFixed(2) : "-"} · look ${lane.adaptiveLookaheadU != null ? lane.adaptiveLookaheadU.toFixed(2) : "-"}`,
+        `Path κ: ${lane.targetCurvature != null ? lane.targetCurvature.toFixed(2) : "-"} /lane · look ${lane.groundLookaheadLanes != null ? lane.groundLookaheadLanes.toFixed(2) : "-"} lane`,
+        `Lane gate: ${lane.laneGateState || "-"} · ${lane.laneGateReason || "-"} · q ${lane.laneGateQuality != null ? lane.laneGateQuality.toFixed(2) : "-"}`,
         `Blue curve: ${lane.blueCurveDirection || "-"} · ${lane.blueCurveSeverity != null ? (lane.blueCurveSeverity * 100).toFixed(0) : "-"}%`
       ];
 
@@ -2752,7 +3311,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
+  window.ROBOT_VISION_BUILD = "2026-09-27-web-bev-curvature-v3-calibrated-15cm-26cm";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

@@ -93,6 +93,10 @@
         headingDNorm: 0,
         rawSteering: 0,
         steeringCommand: 0,
+        geometryTurnRatio: 0,
+        feedbackTurnRatio: 0,
+        effectiveTrackLane: 0,
+        skidMultiplier: 0,
         severity: 0,
         baseSpeed: 0,
         deltaLogical: 0,
@@ -618,72 +622,97 @@
       this.prevControlAt = now;
 
       // ===================================================
-      // 3) CURVATURE COMMAND WITH SOFT SATURATION
+      // 3) CURVATURE KINEMATICS + SMALL CAMERA FEEDBACK
       // ===================================================
-      const wCurvature = Number(this.config.CURVATURE_WEIGHT_TARGET) || 1.30;
-      const wLateral = Number(this.config.CURVATURE_WEIGHT_LATERAL) || 0.68;
-      const wHeading = Number(this.config.CURVATURE_WEIGHT_HEADING) || 0.62;
-      const wHeadingD = Number(this.config.CURVATURE_WEIGHT_HEADING_D) || 0.10;
-
-      let rawSteering =
-        wCurvature * curvatureNorm +
-        wLateral * lateralNorm +
-        wHeading * headingNorm +
-        wHeadingD * headingDNorm;
-
-      // ===================================================
-      // PATH-DIRECTION LOCK
-      // ===================================================
-      // targetCurvature is path shape only in BEV V2.
-      // When the road is clearly LEFT/RIGHT, a small lateral offset must
-      // not flip the steering direction.
-      const directionLockNorm = this.clamp(
-        Number(this.config.CURVATURE_DIRECTION_LOCK_NORM) || 0.13,
-        0.03,
-        0.80
+      // targetCurvature is now approximately 1 / lane-width.
+      //
+      // Ideal differential drive:
+      //   turnRatio = kappa * trackWidth / 2
+      //
+      // This robot has four skid-steer wheels, so lateral tire scrub makes
+      // the effective track wider. We compensate continuously by severity,
+      // instead of hard-coding a pair such as 63/101 or 70/185.
+      const trackWidthLane = this.clamp(
+        Number(this.config.ROBOT_TRACK_WIDTH_LANE_RATIO) || 0.50,
+        0.15,
+        1.20
       );
 
-      const lateralOverrideNorm = this.clamp(
-        Number(this.config.CURVATURE_DIRECTION_OVERRIDE_LATERAL_NORM) || 0.88,
-        0.45,
-        1.0
+      const skidBaseGain = this.clamp(
+        Number(this.config.CURVATURE_SKID_BASE_GAIN) || 1.15,
+        0.60,
+        3.00
       );
 
-      const minDirectionCommand = this.clamp(
-        Number(this.config.CURVATURE_DIRECTION_MIN_COMMAND) || 0.10,
-        0.02,
-        0.50
+      const skidCurveGain = this.clamp(
+        Number(this.config.CURVATURE_SKID_CURVE_GAIN) || 1.15,
+        0,
+        3.00
       );
 
-      const curveSign =
-        Math.abs(curvatureNorm) >= directionLockNorm
-          ? Math.sign(curvatureNorm)
-          : 0;
+      const skidExponent = Math.max(
+        0.35,
+        Number(this.config.CURVATURE_SKID_EXPONENT) || 0.85
+      );
 
-      if (
-        curveSign !== 0 &&
-        Math.abs(lateralNorm) < lateralOverrideNorm &&
-        Math.sign(rawSteering) !== curveSign
-      ) {
-        rawSteering =
-          curveSign *
-          Math.max(
-            minDirectionCommand,
-            Math.min(
-              0.45,
-              Math.abs(curvatureNorm) * 0.72
-            )
-          );
-      }
+      const curveSeverityForSkid = this.clamp(
+        Math.abs(curvatureNorm),
+        0,
+        1
+      );
+
+      const skidMultiplier =
+        skidBaseGain +
+        skidCurveGain *
+        Math.pow(
+          curveSeverityForSkid,
+          skidExponent
+        );
+
+      const geometryTurnRatio =
+        targetCurvature *
+        trackWidthLane *
+        0.5 *
+        skidMultiplier;
+
+      // Feedback only corrects lane-centering / heading error.
+      // It is deliberately bounded so it cannot dominate path curvature.
+      const feedbackRaw =
+        (Number(this.config.CURVATURE_WEIGHT_LATERAL) || 0.36) * lateralNorm +
+        (Number(this.config.CURVATURE_WEIGHT_HEADING) || 0.82) * headingNorm +
+        (Number(this.config.CURVATURE_WEIGHT_HEADING_D) || 0.07) * headingDNorm;
 
       const softScale = Math.max(
         0.25,
         Number(this.config.CURVATURE_SOFT_SCALE) || 1.05
       );
 
-      const steeringCommand =
+      const feedbackMax = this.clamp(
+        Number(this.config.CURVATURE_FEEDBACK_MAX_RATIO) || 0.20,
+        0.04,
+        0.45
+      );
+
+      const feedbackTurnRatio =
         Math.tanh(
-          rawSteering / softScale
+          feedbackRaw / softScale
+        ) *
+        feedbackMax;
+
+      const rawSteering =
+        geometryTurnRatio +
+        feedbackTurnRatio;
+
+      // Debug-compatible steering command.
+      const steeringCommand =
+        this.clamp(
+          rawSteering /
+          Math.max(
+            0.05,
+            Number(this.config.CURVATURE_MAX_TURN_RATIO) || 0.92
+          ),
+          -1,
+          1
         );
 
       const severity = this.clamp(
@@ -742,7 +771,39 @@
       );
 
       let targetTurnRatio =
-        steeringCommand * maxTurnRatio;
+        this.clamp(
+          geometryTurnRatio + feedbackTurnRatio,
+          -maxTurnRatio,
+          maxTurnRatio
+        );
+
+      // If the path curvature is clear, feedback is not allowed to flip
+      // the turn direction unless the robot is extremely off-center.
+      const clearCurve =
+        Math.abs(curvatureNorm) >=
+        this.clamp(
+          Number(this.config.CURVATURE_DIRECTION_LOCK_NORM) || 0.13,
+          0.03,
+          0.80
+        );
+
+      if (
+        clearCurve &&
+        Math.abs(lateralNorm) <
+          this.clamp(
+            Number(this.config.CURVATURE_DIRECTION_OVERRIDE_LATERAL_NORM) || 0.88,
+            0.45,
+            1.0
+          ) &&
+        Math.sign(targetTurnRatio) !== Math.sign(targetCurvature)
+      ) {
+        targetTurnRatio =
+          Math.sign(targetCurvature) *
+          Math.max(
+            0.06,
+            Math.abs(geometryTurnRatio) * 0.75
+          );
+      }
 
       if (oneLineMode) {
         targetTurnRatio *= this.clamp(
@@ -835,6 +896,11 @@
         headingDNorm,
         rawSteering,
         steeringCommand,
+        geometryTurnRatio,
+        feedbackTurnRatio,
+        effectiveTrackLane:
+          trackWidthLane * skidMultiplier,
+        skidMultiplier,
         severity,
         baseSpeed,
         deltaLogical: (leftTarget - rightTarget) / 2,
@@ -1388,6 +1454,21 @@
       const lookaheadText =
         `${Number(state.adaptiveLookaheadU || 0).toFixed(2)} u`;
 
+      const radiusText =
+        Number.isFinite(targetCurvature) &&
+        Math.abs(targetCurvature) > 0.01
+          ? `${(1 / Math.abs(targetCurvature)).toFixed(2)} lane`
+          : "∞";
+
+      const kinematicText =
+        `geo ${Number(state.geometryTurnRatio || 0).toFixed(3)}` +
+        ` · fb ${Number(state.feedbackTurnRatio || 0).toFixed(3)}` +
+        ` · skid ${Number(state.skidMultiplier || 0).toFixed(2)}x`;
+
+      const gateText =
+        `${this.lastVision?.laneGateState || "-"}` +
+        ` · ${this.lastVision?.laneGateReason || "-"}`;
+
       const set = (id, text) => {
         const el = document.getElementById(id);
         if (el) el.textContent = text;
@@ -1402,6 +1483,9 @@
       set("targetCurvatureState", curvatureTargetText);
       set("turnRatioState", turnRatioText);
       set("adaptiveLookaheadState", lookaheadText);
+      set("curveRadiusState", radiusText);
+      set("kinematicTurnState", kinematicText);
+      set("laneGateState", gateText);
 
       set("visionGeometrySteeringState", steeringText);
       set("visionGeometryBaseState", baseText);
@@ -1409,6 +1493,9 @@
       set("visionTargetCurvatureState", curvatureTargetText);
       set("visionTurnRatioState", turnRatioText);
       set("visionAdaptiveLookaheadState", lookaheadText);
+      set("visionCurveRadiusState", radiusText);
+      set("visionKinematicTurnState", kinematicText);
+      set("visionLaneGateState", gateText);
     }
 
     updateBlueCurveDebugUi() {
@@ -1450,7 +1537,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
+  window.ROBOT_NAV_BUILD = "2026-09-27-web-bev-curvature-v3-calibrated-15cm-26cm";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

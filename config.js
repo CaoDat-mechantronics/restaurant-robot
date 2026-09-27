@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Web BEV Curvature V2 · Tangent Intent · Camera Only · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-web-bev-curvature-v3-calibrated-15cm-26cm";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-web-bev-curvature-v3-calibrated-15cm-26cm";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · BEV Curvature V3 · Lane Lock · Track15/Lane26";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -68,7 +68,7 @@ window.APP_CONFIG = {
     VISION_RUN_MIN_DENSITY: 0.56,
 
     // Sliding-window: frame mới ưu tiên tìm quanh line frame trước / điểm trước.
-    VISION_SEARCH_MARGIN_PX: 52,
+    VISION_SEARCH_MARGIN_PX: 46,
     VISION_MIN_POINTS_PER_SIDE: 5,
     VISION_POINT_OUTLIER_PX: 20,
     VISION_MAX_FIT_RMS_PX: 18,
@@ -106,6 +106,33 @@ window.APP_CONFIG = {
     VISION_CENTER_EMA_ALPHA: 0.42,
     VISION_MAX_CENTER_JUMP_PX: 26,
 
+    // ===================================================
+    // LANE LOCK / FALSE-POSITIVE REJECTION
+    // ===================================================
+    // Sau khi bắt đúng lane, detector khóa theo hình học + lịch sử.
+    // Vật thể tối mới xuất hiện ngoài corridor sẽ không được đổi lane ngay.
+    VISION_LANE_LOCK_ENABLE: true,
+    VISION_LANE_ACQUIRE_CONFIRM_FRAMES: 3,
+    VISION_LANE_REJECT_UNLOCK_FRAMES: 5,
+
+    // Khi đã lock, search window hẹp hơn.
+    VISION_LOCKED_SEARCH_MARGIN_PX: 32,
+
+    // Hai line thật phải xuất hiện ở đủ số lát quét.
+    VISION_PAIR_MIN_COVERAGE: 0.34,
+
+    // Độ lệch trung bình so với lane frame trước, tính theo lane-width.
+    VISION_PAIR_MAX_TEMPORAL_INNOVATION_LANES: 0.22,
+
+    // Khi bắt lane mới, tâm lane phải tương đối gần tâm camera.
+    VISION_ACQUIRE_CENTER_MAX_OFFSET_LANES: 0.42,
+
+    // Bề rộng lane theo phối cảnh: gần camera không được co nhỏ bất thường.
+    VISION_PERSPECTIVE_MIN_NEAR_FAR_WIDTH_RATIO: 0.82,
+
+    // Fit quá xấu thì loại thẳng, không chỉ giảm confidence.
+    VISION_PAIR_MAX_FIT_RMS_PX: 17,
+
     // Điểm gần dùng để đo lệch ngang và điểm nhìn trước dùng để bắt cua sớm.
     // 0 = đầu ROI (xa), 1 = cuối ROI (gần robot).
     VISION_NEAR_Y_RATIO: 0.88,
@@ -136,11 +163,24 @@ window.APP_CONFIG = {
     // Đây là hệ số scale hình học, KHÔNG phải PWM.
     VISION_BEV_X_SCALE: 0.55,
 
+    // ===================================================
+    // GROUND-GEOMETRY SCALE
+    // ===================================================
+    // Dùng bề rộng lane theo phối cảnh để ước lượng trục tiến trên mặt đất.
+    // Đơn vị hình học là "lane width".
+    //
+    // near distance = khoảng cách từ camera tới hàng near, chia cho bề rộng lane.
+    // Đây là tham số calibration hình học, KHÔNG phải PWM.
+    VISION_GROUND_NEAR_DISTANCE_LANES: 0.60,
+
+    // Nếu span suy ra quá ngắn thì không tin curvature metric.
+    VISION_GROUND_MIN_FORWARD_SPAN_LANES: 0.45,
+
     // Adaptive look-ahead: đường thẳng nhìn xa, cua gắt nhìn gần.
     // u=0 ở gần robot, u=1 ở xa.
     VISION_BEV_LOOKAHEAD_NEAR_U: 0.26,
     VISION_BEV_LOOKAHEAD_FAR_U: 0.70,
-    VISION_BEV_CURVATURE_FULL: 1.35,
+    VISION_BEV_CURVATURE_FULL: 1.20,
     VISION_BEV_HEADING_FULL_DEG: 18,
     VISION_BEV_LOOKAHEAD_EMA_ALPHA: 0.38,
 
@@ -328,7 +368,32 @@ window.APP_CONFIG = {
 
     // turnRatio=0 -> hai bên bằng nhau; |turnRatio| tăng liên tục theo sai số.
     // Không phải gap PWM cố định.
-    CURVATURE_MAX_TURN_RATIO: 0.82,
+    CURVATURE_MAX_TURN_RATIO: 0.92,
+
+    // ===================================================
+    // CURVATURE -> SKID-STEER KINEMATICS
+    // ===================================================
+    // Quan trọng: để tính bán kính quay đúng theo kích thước xe,
+    // hãy đặt:
+    //   ROBOT_TRACK_WIDTH_LANE_RATIO =
+    //     khoảng cách tâm bánh trái-phải / khoảng cách hai line.
+    //
+    // Ví dụ track=24cm, lane=45cm => 0.533.
+    // Measured robot/lane geometry:
+    //   wheel-center track = 15 cm
+    //   black-line center distance = (23 + 29) / 2 = 26 cm
+    //   15 / 26 = 0.576923...
+    ROBOT_TRACK_WIDTH_LANE_RATIO: 0.577,
+
+    // Xe 4 bánh skid-steer cần chênh tốc độ lớn hơn differential-drive lý tưởng
+    // do ma sát trượt ngang. Đây là hệ số vật lý liên tục theo curvature,
+    // không phải cặp PWM hard-code.
+    CURVATURE_SKID_BASE_GAIN: 1.15,
+    CURVATURE_SKID_CURVE_GAIN: 1.15,
+    CURVATURE_SKID_EXPONENT: 0.85,
+
+    // Feedback vị trí/heading chỉ tinh chỉnh quanh curvature hình học.
+    CURVATURE_FEEDBACK_MAX_RATIO: 0.20,
 
     // Cua càng gắt thì tốc độ trung bình càng giảm trước khi tăng chênh hai bên.
     CURVATURE_SPEED_SLOWDOWN_GAIN: 0.72,
