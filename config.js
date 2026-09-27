@@ -115,11 +115,11 @@ window.APP_CONFIG = {
     // ---------------------------------------------------
     // PATH FOLLOW CONTROLLER - ƯU TIÊN ĐIỂM HỒNG LOOK-AHEAD
     // ---------------------------------------------------
-    BASE_SPEED: 100,
+    BASE_SPEED: 94,
 
     // Thang tốc độ LOGIC nội bộ. Với hộp số 1/120 không cần đẩy quá cao;
     // vẫn giữ đủ khoảng điều khiển để tạo chênh lệch trái/phải mượt.
-    MAX_SPEED: 165,
+    MAX_SPEED: 160,
 
     // ===================================================
     // MOTOR OUTPUT VẬT LÝ - KICK START + CRUISE
@@ -133,16 +133,16 @@ window.APP_CONFIG = {
     // MOTOR_CRUISE_PWM : PWM chạy thẳng mặc định.
     // START_BOOST đang tắt (0 ms); chỉ bật lại nếu thực tế vẫn khó đề-pa.
     MOTOR_MIN_RUN_PWM: 50,
-    MOTOR_CRUISE_PWM: 105,
-    MOTOR_START_BOOST_PWM: 118,
+    MOTOR_CRUISE_PWM: 98,
+    MOTOR_START_BOOST_PWM: 112,
     MOTOR_START_BOOST_MS: 0,
-    MOTOR_MAX_PWM: 165,
+    MOTOR_MAX_PWM: 160,
 
 
     // Giá trị logic cực nhỏ được coi là STOP.
     MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
 
-    MIN_CURVE_SPEED: 55,
+    MIN_CURVE_SPEED: 45,
 
     // pathAngle là góc vector:
     //   center xanh gần xe -> điểm hồng look-ahead
@@ -181,7 +181,7 @@ window.APP_CONFIG = {
     PATH_FULL_SLOWDOWN_DEG: 15,
 
     // Không cho correction lái vượt quá mức này (PWM).
-    MAX_STEERING_CORRECTION: 55,
+    MAX_STEERING_CORRECTION: 65,
 
     // Lệch tâm tới tỷ lệ này của bề rộng frame thì giảm tốc mạnh.
     CENTER_FULL_SLOWDOWN_RATIO: 0.20,
@@ -199,13 +199,26 @@ window.APP_CONFIG = {
 
     // Khi bám line bình thường không đảo chiều bánh trong cua. Hộp số 1/120
     // đủ mô-men để cua bằng cách giảm bánh trong thay vì reverse.
-    LINE_FOLLOW_MIN_LOGICAL_SPEED: 14,
+    LINE_FOLLOW_MIN_LOGICAL_SPEED: 6,
 
     // Ngưỡng PWM tối thiểu để bánh đang CHẠY TIẾN có đủ mô-men dưới tải.
     // Chỉ áp dụng khi LINE_FOLLOW / REACQUIRE_LINE và cả hai bánh cùng tiến.
     // Nếu bánh trong thấp hơn ngưỡng này, code nâng bánh trong lên floor
     // và nâng bánh ngoài cùng một lượng để giữ chênh lệch steering.
-    LINE_FOLLOW_TORQUE_FLOOR_PWM: 70,
+    LINE_FOLLOW_TORQUE_FLOOR_PWM: 65,
+
+    // Bảo đảm xe vẫn có đủ mô-men quay thân khi vào cua.
+    // Chỉ kích hoạt khi chênh tốc độ LOGIC đủ lớn để xác nhận đây là cua thật,
+    // tránh làm xe lắc khi gần như đang đi thẳng.
+    STEERING_GAP_ACTIVATE_LOGICAL: 12,
+    STEERING_GAP_MEDIUM_LOGICAL: 32,
+    STEERING_GAP_STRONG_LOGICAL: 64,
+
+    // Chênh PWM tối thiểu giữa bánh ngoài và bánh trong theo độ gắt của cua.
+    // Bánh trong vẫn >= torque floor; bánh ngoài được tăng thêm nếu cần.
+    MIN_TURN_PWM_GAP_LIGHT: 28,
+    MIN_TURN_PWM_GAP_MEDIUM: 38,
+    MIN_TURN_PWM_GAP_STRONG: 48,
 
     // Hệ số trim để cân sai số motor/driver/điện áp hai bên.
     // Giữ 1.00 khi chưa hiệu chuẩn. Sau khi test đường thẳng mới chỉnh 1-3%.
