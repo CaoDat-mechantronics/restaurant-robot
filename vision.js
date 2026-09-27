@@ -1309,7 +1309,8 @@
         nearT - 0.08
       );
 
-      // Đoạn vàng rất ngắn, nằm trực tiếp trên centerCurve xanh.
+      // Sample rất ngắn trên BLUE centerCurve để ước lượng tiếp tuyến cục bộ.
+      // Đây là dữ liệu hình học; đường vàng trên UI là hướng camera riêng.
       const localHeadingDeltaT = this.clamp(
         Number(this.config.VISION_LOCAL_HEADING_T_DELTA) || 0.08,
         0.035,
@@ -1981,36 +1982,49 @@
       );
 
       // ---------------------------------------------------
-      // SHORT YELLOW LOCAL-HEADING GUIDE
+      // SHORT YELLOW CAMERA-HEADING GUIDE
       // ---------------------------------------------------
-      // Đây KHÔNG phải trục camera dài.
-      // Hai đầu đoạn vàng đều nằm trên centerCurve xanh:
-      // near point -> local heading point.
-      // Vì rất ngắn, đoạn này xấp xỉ tiếp tuyến cục bộ của đường xanh.
+      // Đường vàng là hướng thật của camera/robot trong ảnh:
+      // một đoạn thẳng đứng rất ngắn tại tâm camera.
+      // Nó KHÔNG bị ép lên đường xanh.
+      //
+      // Nếu vàng và xanh tách nhau:
+      // - lệch ngang => lateral error
+      // - khác hướng => heading error
       if (
-        Number.isFinite(lane.laneCenter) &&
-        Number.isFinite(lane.localHeadingCenter) &&
+        Number.isFinite(lane.frameCenter) &&
         Number.isFinite(lane.nearY) &&
-        Number.isFinite(lane.localHeadingY)
+        Number.isFinite(lane.roiHeight)
       ) {
+        const guideRatio = this.clamp(
+          Number(this.config.VISION_CAMERA_HEADING_LENGTH_RATIO) || 0.06,
+          0.025,
+          0.16
+        );
+        const guideLength = Math.max(
+          8,
+          lane.roiHeight * guideRatio
+        );
+        const guideBottomY = lane.nearY;
+        const guideTopY = Math.max(
+          lane.roiTop,
+          guideBottomY - guideLength
+        );
+
         ctx.save();
         ctx.strokeStyle = "#fdb022";
         ctx.lineWidth = 4;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(lane.laneCenter, lane.nearY);
-        ctx.lineTo(
-          lane.localHeadingCenter,
-          lane.localHeadingY
-        );
+        ctx.moveTo(lane.frameCenter, guideBottomY);
+        ctx.lineTo(lane.frameCenter, guideTopY);
         ctx.stroke();
 
-        // Điểm đầu đoạn vàng trên đường xanh.
         ctx.fillStyle = "#fdb022";
         ctx.beginPath();
         ctx.arc(
-          lane.localHeadingCenter,
-          lane.localHeadingY,
+          lane.frameCenter,
+          guideBottomY,
           4,
           0,
           Math.PI * 2
@@ -2072,8 +2086,9 @@
         `Mode: ${lane.trackMode || "-"}`,
         `Otsu T: ${thresholds || "-"} · dark ${(lane.darkRatio * 100).toFixed(1)}%`,
         `Conf: ${(lane.laneConfidence * 100).toFixed(0)}% · width ${lane.laneWidth != null ? lane.laneWidth.toFixed(0) : "-"}px`,
-        `Err: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px · long ${lane.headingErrorDeg != null ? lane.headingErrorDeg.toFixed(1) : "-"}°`,
-        `Yellow local: ${lane.localHeadingErrorDeg != null ? lane.localHeadingErrorDeg.toFixed(1) : "-"}° · control ${lane.controlHeadingErrorDeg != null ? lane.controlHeadingErrorDeg.toFixed(1) : "-"}°`,
+        `Lateral: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px`,
+        `Yellow camera: 0.0° · Blue tangent ${lane.localHeadingErrorDeg != null ? lane.localHeadingErrorDeg.toFixed(1) : "-"}°`,
+        `Control heading: ${lane.controlHeadingErrorDeg != null ? lane.controlHeadingErrorDeg.toFixed(1) : "-"}° · curve ${lane.curvatureDeg != null ? lane.curvatureDeg.toFixed(1) : "-"}°`,
         `Blue curve: ${lane.blueCurveDirection || "-"} · ${lane.blueCurveSeverity != null ? (lane.blueCurveSeverity * 100).toFixed(0) : "-"}%`
       ];
 
@@ -2302,7 +2317,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
+  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-lane-geometry-v1";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

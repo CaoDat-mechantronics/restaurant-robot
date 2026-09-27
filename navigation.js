@@ -85,13 +85,18 @@
       this.blueCurveTargetGap = 0;
       this.filteredBlueCurveGap = 0;
 
-      // Adaptive curvature + yaw feedback.
-      this.adaptiveTurnRatio = 0;
-      this.adaptiveTargetYawRate = 0;
-      this.adaptiveActualYawRate = 0;
-      this.adaptiveYawIntegral = 0;
-      this.adaptivePrevYaw = null;
-      this.adaptivePrevYawAt = 0;
+      // Debug/state cho lane-geometry soft controller.
+      this.geometryControl = {
+        lateralNorm: 0,
+        headingNorm: 0,
+        curvatureNorm: 0,
+        headingDNorm: 0,
+        rawSteering: 0,
+        steeringCommand: 0,
+        severity: 0,
+        baseSpeed: 0,
+        deltaLogical: 0
+      };
     }
 
     // =====================================================
@@ -116,7 +121,7 @@
       this.motorNeedsStartBoost = true;
       this.motorStartBoostUntil = 0;
       this.resetLineController();
-      this.resetAdaptiveCurveController();
+      this.resetGeometryControllerDebug();
       this.setMotorReason("WAITING_VISION", "Đang chờ camera nhận diện lane");
 
       this.setState(NAV_STATE.LINE_FOLLOW);
@@ -233,6 +238,7 @@
       this.blueCurveTargetGap = 0;
       this.filteredBlueCurveGap = 0;
       this.updateBlueCurveDebugUi();
+      this.resetGeometryControllerDebug();
     }
 
     // =====================================================
@@ -667,7 +673,7 @@
         1
       );
       this.blueCurveDirection = String(frame.blueCurveDirection || "STRAIGHT");
-      this.updateAdaptiveYawRate();
+
 
       const positionDeadband = Math.max(
         0,
@@ -711,9 +717,24 @@
         1
       );
 
+      const severityWeight = this.clamp(
+        Number(this.config.LANE_CURVE_SPEED_SEVERITY_WEIGHT) || 1.0,
+        0,
+        1.5
+      );
+
+      const speedCurveSeverity = this.clamp(
+        Math.max(
+          curveRatio,
+          this.blueCurveSeverity * severityWeight
+        ),
+        0,
+        1
+      );
+
       let baseSpeed =
         configuredBase -
-        curveRatio * (configuredBase - minCurveSpeed);
+        speedCurveSeverity * (configuredBase - minCurveSpeed);
 
       // Lệch tâm quá xa cũng phải giảm tốc.
       const centerFullSlowdownRatio = this.clamp(
@@ -812,119 +833,180 @@
       this.prevControlAt = now;
 
       // ===================================================
-      // 6) PATH FOLLOW CONTROLLER
+      // 6) LANE GEOMETRY SOFT CONTROLLER
       // ===================================================
-      // Thành phần chính: pathAngle từ điểm xanh gần xe -> điểm hồng.
-      // Thành phần phụ: positionError giữ robot gần giữa lane.
-      const angleKp = Number(this.config.PATH_ANGLE_KP) || 2.15;
-      const angleKd = Number(this.config.PATH_ANGLE_KD) || 0.030;
-      const positionKp = Number(this.config.POSITION_KP) || 0.075;
-      const positionKd = Number(this.config.POSITION_KD) || 0.0025;
-      const curvatureKp = Number(this.config.CURVATURE_KP) || 0.09;
-
-      const angleTerm = angleKp * pathAngle;
-      const angleDTerm = angleKd * this.filteredPathAngleDerivative;
-      const positionTerm = positionKp * positionError;
-      const positionDTerm = positionKd * this.filteredLineDerivative;
-      const curvatureTerm = curvatureKp * curvatureDeg;
-
-      let correction =
-        angleTerm +
-        angleDTerm +
-        positionTerm +
-        positionDTerm +
-        curvatureTerm;
-
-      // ===================================================
-      // 7) CURVE DIRECTION LOCK
-      // ===================================================
-      // Nếu điểm hồng thể hiện một cua rõ ràng thì không cho positionError
-      // gần xe lật ngược hướng cua, trừ khi xe đã lệch tâm cực lớn.
+      // Không dùng cặp PWM hard-code.
+      // Camera tạo 3 tín hiệu hình học:
+      //   lateral  : center xanh gần xe lệch khỏi tâm camera bao nhiêu
+      //   heading  : tiếp tuyến cục bộ của đường xanh khác hướng camera bao nhiêu
+      //   curvature: đường xanh tiếp tục uốn bao nhiêu ở phía trước
       //
-      // pathAngle < 0 -> bắt buộc correction âm -> Right > Left -> cua trái
-      // pathAngle > 0 -> bắt buộc correction dương -> Left > Right -> cua phải
-      const lockDeg = Math.max(
-        0,
-        Number(this.config.CURVE_DIRECTION_LOCK_DEG) || 5
+      // Tất cả được chuẩn hoá rồi qua tanh() để steering tăng mượt:
+      // sai số nhỏ -> correction nhỏ
+      // sai số lớn -> correction lớn
+      // nhưng không nhảy vô hạn.
+      const lateralFullRatio = this.clamp(
+        Number(this.config.LANE_LATERAL_FULL_RATIO) || 0.18,
+        0.05,
+        0.45
       );
-      const minCurveCorrection = Math.max(
-        0,
-        Number(this.config.CURVE_DIRECTION_MIN_CORRECTION) || 10
+      const headingFullDeg = Math.max(
+        3,
+        Number(this.config.LANE_HEADING_FULL_DEG) || 20
       );
-      const overrideOffCenter = this.clamp(
-        Number(this.config.CURVE_DIRECTION_OVERRIDE_OFFCENTER_RATIO) || 0.85,
-        0.35,
+      const curvatureFullDeg = Math.max(
+        2,
+        Number(this.config.LANE_CURVATURE_FULL_DEG) || 10
+      );
+      const headingDFullDegS = Math.max(
+        20,
+        Number(this.config.LANE_HEADING_D_FULL_DEG_S) || 140
+      );
+
+      const lateralNorm = this.clamp(
+        positionError /
+          Math.max(1, frameWidth * lateralFullRatio),
+        -1,
+        1
+      );
+      const headingNorm = this.clamp(
+        pathAngle / headingFullDeg,
+        -1,
+        1
+      );
+      const curvatureNorm = this.clamp(
+        curvatureDeg / curvatureFullDeg,
+        -1,
+        1
+      );
+      const headingDNorm = this.clamp(
+        this.filteredPathAngleDerivative / headingDFullDegS,
+        -1,
         1
       );
 
-      if (
-        Math.abs(pathAngle) >= lockDeg &&
-        offCenterRatio < overrideOffCenter
-      ) {
-        if (pathAngle < 0 && correction > -minCurveCorrection) {
-          correction = -minCurveCorrection;
-        }
-        else if (pathAngle > 0 && correction < minCurveCorrection) {
-          correction = minCurveCorrection;
-        }
-      }
+      const wLateral =
+        Number(this.config.LANE_WEIGHT_LATERAL) || 0.80;
+      const wHeading =
+        Number(this.config.LANE_WEIGHT_HEADING) || 1.35;
+      const wCurvature =
+        Number(this.config.LANE_WEIGHT_CURVATURE) || 0.72;
+      const wHeadingD =
+        Number(this.config.LANE_WEIGHT_HEADING_D) || 0.14;
+
+      let rawSteering =
+        wLateral * lateralNorm +
+        wHeading * headingNorm +
+        wCurvature * curvatureNorm +
+        wHeadingD * headingDNorm;
+
+      const softScale = Math.max(
+        0.20,
+        Number(this.config.LANE_STEERING_SOFT_SCALE) || 1.00
+      );
+
+      let steeringCommand = Math.tanh(
+        rawSteering / softScale
+      );
+
+      // Severity quyết định "quyền" tạo chênh tốc.
+      // Không quyết định một cặp PWM cụ thể.
+      const steeringSeverity = this.clamp(
+        Math.max(
+          this.blueCurveSeverity,
+          Math.abs(headingNorm),
+          Math.abs(curvatureNorm),
+          Math.abs(lateralNorm) * 0.70
+        ),
+        0,
+        1
+      );
+
+      const minDeltaLogical = Math.max(
+        0,
+        Number(this.config.LANE_STEERING_MIN_DELTA_LOGICAL) || 10
+      );
+      const maxDeltaLogical = Math.max(
+        minDeltaLogical + 1,
+        Number(this.config.LANE_STEERING_MAX_DELTA_LOGICAL) || 110
+      );
+      const deltaExponent = Math.max(
+        0.35,
+        Number(this.config.LANE_STEERING_DELTA_EXPONENT) || 0.88
+      );
+
+      let steeringAuthority =
+        minDeltaLogical +
+        (maxDeltaLogical - minDeltaLogical) *
+        Math.pow(steeringSeverity, deltaExponent);
 
       if (oneLineMode) {
-        correction *= this.clamp(
+        steeringAuthority *= this.clamp(
           Number(this.config.ONE_LINE_STEERING_GAIN) || 1.08,
           0.75,
-          1.40
+          1.35
         );
       }
 
       if (predictedMode) {
-        correction *= this.clamp(
+        steeringAuthority *= this.clamp(
           Number(this.config.LOST_PREDICT_STEERING_GAIN) || 0.82,
-          0.35,
-          1.00
+          0.30,
+          1
         );
       }
 
-      const maxCorrection = Math.max(
-        10,
-        Number(this.config.MAX_STEERING_CORRECTION) || 58
-      );
+      let correction =
+        steeringCommand * steeringAuthority;
 
-      // Với hộp số 1/120, khi baseSpeed đã giảm ở cua thì steering cũng
-      // phải giảm theo. Không cho correction lớn hơn phần tốc độ còn lại
-      // của bánh trong, tránh trạng thái một bánh bị ép xuống minimum còn
-      // bánh ngoài vọt lên cao gây giật lái / quay quá góc.
-      const configuredMinForwardForLimit = Number(
-        this.config.LINE_FOLLOW_MIN_LOGICAL_SPEED
-      );
-      const minForwardForLimit = Math.max(
+      // ===================================================
+      // 7) DIRECTION LOCK NHẸ THEO BLUE CURVE
+      // ===================================================
+      // Chỉ bảo vệ dấu khi blue curve rất rõ.
+      // Nếu robot lệch tâm cực lớn, lateral controller vẫn được override.
+      const lockSeverity = this.clamp(
+        Number(this.config.LANE_DIRECTION_LOCK_SEVERITY) || 0.28,
         0,
-        Number.isFinite(configuredMinForwardForLimit)
-          ? configuredMinForwardForLimit
-          : 6
+        1
       );
-      const speedAwareMaxCorrection = Math.max(
-        10,
-        baseSpeed - minForwardForLimit
+      const lockMinDelta = Math.max(
+        0,
+        Number(this.config.LANE_DIRECTION_LOCK_MIN_DELTA_LOGICAL) || 8
       );
-      const effectiveMaxCorrection = Math.min(
-        maxCorrection,
-        speedAwareMaxCorrection
-      );
-
-      correction = this.clamp(
-        correction,
-        -effectiveMaxCorrection,
-        effectiveMaxCorrection
+      const overrideLateral = this.clamp(
+        Number(this.config.LANE_DIRECTION_OVERRIDE_LATERAL) || 0.88,
+        0.3,
+        1
       );
 
+      if (
+        this.blueCurveSeverity >= lockSeverity &&
+        Math.abs(lateralNorm) < overrideLateral
+      ) {
+        if (
+          this.blueCurveDirection === "LEFT" &&
+          correction > -lockMinDelta
+        ) {
+          correction = -lockMinDelta;
+        }
+        else if (
+          this.blueCurveDirection === "RIGHT" &&
+          correction < lockMinDelta
+        ) {
+          correction = lockMinDelta;
+        }
+      }
+
       // ===================================================
-      // 8) Differential drive
+      // 8) DIFFERENTIAL DRIVE
       // ===================================================
-      // correction < 0 -> Left chậm, Right nhanh -> cua trái
-      // correction > 0 -> Left nhanh, Right chậm -> cua phải
-      // Hộp số 1/120 đã đủ mô-men: khi bám line chỉ cần giảm bánh trong,
-      // không reverse bánh trong vì reverse dễ làm xe giật và quá lái.
+      // correction < 0 -> Left giảm, Right tăng -> cua trái
+      // correction > 0 -> Left tăng, Right giảm -> cua phải
+      //
+      // Không speed-aware clamp theo baseSpeed nữa:
+      // ở cua gắt bánh trong được phép giảm rất thấp,
+      // đồng thời bánh ngoài vẫn có thể tăng cao.
+      // Chỉ cấm reverse trong LINE_FOLLOW.
       const configuredMinForward = Number(
         this.config.LINE_FOLLOW_MIN_LOGICAL_SPEED
       );
@@ -932,7 +1014,7 @@
         0,
         Number.isFinite(configuredMinForward)
           ? configuredMinForward
-          : 6
+          : 1
       );
 
       const leftTarget = this.clamp(
@@ -945,6 +1027,19 @@
         minForwardLogical,
         maxSpeed
       );
+
+      this.geometryControl = {
+        lateralNorm,
+        headingNorm,
+        curvatureNorm,
+        headingDNorm,
+        rawSteering,
+        steeringCommand,
+        severity: steeringSeverity,
+        baseSpeed,
+        deltaLogical: correction
+      };
+      this.updateGeometryControllerDebug();
 
       const directionText =
         pathAngle < -angleDeadband
@@ -1268,9 +1363,13 @@
         boostActive
       );
 
-      // Precision V2 giữ lane. Lớp adaptive dùng độ cong đường xanh
-      // + yaw-rate thực tế để tự quyết định steering authority liên tục.
-      mapped = this.applyAdaptiveCurveControl(mapped);
+      // LINE_FOLLOW đã tính steering từ lane geometry ở thang LOGIC.
+      // Tại đây chỉ map sang PWM vật lý; không có profile/gap/yaw controller
+      // bổ sung để tránh điều khiển chồng nhau.
+      mapped = {
+        left: Math.round(mapped.left),
+        right: Math.round(mapped.right)
+      };
 
       this.lastMotorAt = now;
       this.lastMotor = {
@@ -1374,40 +1473,10 @@
       );
 
       // ---------------------------------------------------
-      // MINIMAL TORQUE FLOOR - GIỮ NGUYÊN THUẬT TOÁN PRECISION-V2
+      // Không ép torque floor riêng trong LINE_FOLLOW.
+      // MOTOR_MIN_RUN_PWM là giới hạn vật lý duy nhất cho bánh đang quay.
+      // Vì vậy bánh trong có thể linh hoạt xuống dưới 70 nếu hình học yêu cầu.
       // ---------------------------------------------------
-      // Chỉ xử lý lỗi cơ khí: bánh trong cua có PWM quá thấp nên không quay.
-      // Không thay PID, baseSpeed, correction hay steering của precision-v2.
-      // Nếu phải nâng bánh trong lên torque floor, nâng bánh ngoài cùng lượng
-      // để giữ gần nguyên độ chênh PWM mà precision-v2 đã tính.
-      // TURNING không áp dụng để vẫn cho phép -PWM/+PWM khi quay 90°.
-      const forwardTrackingState =
-        this.state === NAV_STATE.LINE_FOLLOW ||
-        this.state === NAV_STATE.REACQUIRE_LINE;
-
-      if (forwardTrackingState && leftPwm > 0 && rightPwm > 0) {
-        const configuredTorqueFloor = Number(
-          this.config.LINE_FOLLOW_TORQUE_FLOOR_PWM
-        );
-        const torqueFloor = this.clamp(
-          Number.isFinite(configuredTorqueFloor)
-            ? configuredTorqueFloor
-            : 70,
-          minRunPwm,
-          maxPwm
-        );
-
-        if (leftPwm < rightPwm && leftPwm < torqueFloor) {
-          const deficit = torqueFloor - leftPwm;
-          leftPwm = torqueFloor;
-          rightPwm = Math.min(maxPwm, rightPwm + deficit);
-        }
-        else if (rightPwm < leftPwm && rightPwm < torqueFloor) {
-          const deficit = torqueFloor - rightPwm;
-          rightPwm = torqueFloor;
-          leftPwm = Math.min(maxPwm, leftPwm + deficit);
-        }
-      }
 
       // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá chênh lệch
       // trái/phải. Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
@@ -1464,587 +1533,69 @@
     // ADAPTIVE CURVATURE + GYRO FEEDBACK
     // =====================================================
 
-    resetAdaptiveCurveController() {
-      this.adaptiveTurnRatio = 0;
-      this.adaptiveTargetYawRate = 0;
-      this.adaptiveActualYawRate = 0;
-      this.adaptiveYawIntegral = 0;
-      this.adaptivePrevYaw = null;
-      this.adaptivePrevYawAt = 0;
-      this.updateAdaptiveCurveDebugUi();
-    }
-
-    updateAdaptiveYawRate() {
-      const yaw = this.orientation?.getYaw?.();
-      const now = performance.now();
-
-      if (!Number.isFinite(Number(yaw))) {
-        this.adaptivePrevYaw = null;
-        this.adaptivePrevYawAt = now;
-        this.adaptiveActualYawRate = 0;
-        return;
-      }
-
-      const currentYaw = Number(yaw);
-
-      if (
-        this.adaptivePrevYaw == null ||
-        this.adaptivePrevYawAt <= 0
-      ) {
-        this.adaptivePrevYaw = currentYaw;
-        this.adaptivePrevYawAt = now;
-        return;
-      }
-
-      const dt = (now - this.adaptivePrevYawAt) / 1000;
-
-      if (dt < 0.015 || dt > 0.35) {
-        this.adaptivePrevYaw = currentYaw;
-        this.adaptivePrevYawAt = now;
-        return;
-      }
-
-      const deltaYaw =
-        window.RobotOrientation?.deltaDegrees
-          ? window.RobotOrientation.deltaDegrees(
-              currentYaw,
-              this.adaptivePrevYaw
-            )
-          : currentYaw - this.adaptivePrevYaw;
-
-      const rawRate = deltaYaw / dt;
-
-      const alpha = this.clamp(
-        Number(this.config.ADAPTIVE_YAW_RATE_EMA_ALPHA) || 0.26,
-        0.05,
-        1
-      );
-
-      this.adaptiveActualYawRate +=
-        alpha * (rawRate - this.adaptiveActualYawRate);
-
-      this.adaptivePrevYaw = currentYaw;
-      this.adaptivePrevYawAt = now;
-    }
-
-    applyAdaptiveCurveControl(mapped) {
-      if (
-        this.config.ADAPTIVE_CURVE_ENABLE === false ||
-        this.state !== NAV_STATE.LINE_FOLLOW ||
-        !mapped ||
-        mapped.left <= 0 ||
-        mapped.right <= 0
-      ) {
-        this.adaptiveTurnRatio = 0;
-        this.adaptiveTargetYawRate = 0;
-        this.adaptiveYawIntegral = 0;
-        this.updateAdaptiveCurveDebugUi();
-        return mapped;
-      }
-
-      const severity = this.clamp(
-        Number(this.blueCurveSeverity) || 0,
-        0,
-        1
-      );
-
-      const direction =
-        this.blueCurveDirection === "LEFT"
-          ? -1
-          : this.blueCurveDirection === "RIGHT"
-            ? 1
-            : 0;
-
-      const activate = this.clamp(
-        Number(this.config.ADAPTIVE_CURVE_ACTIVATE_SEVERITY) || 0.06,
-        0,
-        0.8
-      );
-
-      if (direction === 0 || severity <= activate) {
-        this.adaptiveTurnRatio *= 0.72;
-        this.adaptiveTargetYawRate = 0;
-        this.adaptiveYawIntegral *= 0.65;
-        this.updateAdaptiveCurveDebugUi();
-        return {
-          left: Math.round(mapped.left),
-          right: Math.round(mapped.right)
-        };
-      }
-
-      // ---------------------------------------------------
-      // 1) Camera feed-forward từ hình học đường xanh
-      // ---------------------------------------------------
-      const normalized = this.clamp(
-        (severity - activate) /
-          Math.max(0.001, 1 - activate),
-        0,
-        1
-      );
-
-      const curveExponent = Math.max(
-        0.45,
-        Number(this.config.ADAPTIVE_CURVE_EXPONENT) || 1.05
-      );
-
-      const maxTurnRatio = Math.max(
-        0.2,
-        Number(this.config.ADAPTIVE_CURVE_MAX_TURN_RATIO) || 1.45
-      );
-
-      let targetRatio =
-        Math.pow(normalized, curveExponent) *
-        maxTurnRatio;
-
-      // ---------------------------------------------------
-      // 2) Gyro feedback
-      // ---------------------------------------------------
-      const yawFeedbackEnabled =
-        this.config.ADAPTIVE_YAW_FEEDBACK_ENABLE !== false;
-
-      const yawMax = Math.max(
-        10,
-        Number(this.config.ADAPTIVE_YAW_RATE_MAX_DEG_S) || 95
-      );
-
-      const yawExponent = Math.max(
-        0.5,
-        Number(this.config.ADAPTIVE_YAW_RATE_EXPONENT) || 1
-      );
-
-      const targetYawMagnitude =
-        yawMax * Math.pow(normalized, yawExponent);
-
-      this.adaptiveTargetYawRate =
-        direction * targetYawMagnitude;
-
-      if (
-        yawFeedbackEnabled &&
-        Number.isFinite(this.adaptiveActualYawRate)
-      ) {
-        // Chuyển sai số về hệ toạ độ "đúng hướng cua":
-        // >0 = robot quay CHƯA ĐỦ -> tăng steering.
-        // <0 = robot quay QUÁ NHIỀU -> giảm steering.
-        const directionalActual =
-          direction * this.adaptiveActualYawRate;
-
-        const directionalError =
-          targetYawMagnitude - directionalActual;
-
-        const kp = Math.max(
-          0,
-          Number(this.config.ADAPTIVE_YAW_KP) || 0.007
-        );
-
-        const ki = Math.max(
-          0,
-          Number(this.config.ADAPTIVE_YAW_KI) || 0.0008
-        );
-
-        const integralLimit = Math.max(
-          1,
-          Number(this.config.ADAPTIVE_YAW_INTEGRAL_LIMIT) || 45
-        );
-
-        const dt = Math.max(
-          0.02,
-          (Number(this.config.MOTOR_INTERVAL_MS) || 40) / 1000
-        );
-
-        this.adaptiveYawIntegral = this.clamp(
-          this.adaptiveYawIntegral + directionalError * dt,
-          -integralLimit,
-          integralLimit
-        );
-
-        targetRatio +=
-          kp * directionalError +
-          ki * this.adaptiveYawIntegral;
-      }
-
-      targetRatio = this.clamp(
-        targetRatio,
-        0,
-        maxTurnRatio
-      );
-
-      // ---------------------------------------------------
-      // 3) Slew ratio để steering không giật
-      // ---------------------------------------------------
-      const ratioMaxDelta = Math.max(
-        0.01,
-        Number(this.config.ADAPTIVE_CURVE_RATIO_MAX_DELTA) || 0.10
-      );
-
-      const ratioDelta = this.clamp(
-        targetRatio - this.adaptiveTurnRatio,
-        -ratioMaxDelta,
-        ratioMaxDelta
-      );
-
-      this.adaptiveTurnRatio = this.clamp(
-        this.adaptiveTurnRatio + ratioDelta,
-        0,
-        maxTurnRatio
-      );
-
-      // ---------------------------------------------------
-      // 4) Differential-drive allocation
-      // ---------------------------------------------------
-      // centerPwm lấy trực tiếp từ Precision V2 hiện tại, nên tốc độ nền
-      // vẫn giảm theo cua/confidence như trước.
-      const centerPwm = Math.max(
-        1,
-        (Math.abs(mapped.left) + Math.abs(mapped.right)) / 2
-      );
-
-      const minInner = this.clamp(
-        Number(this.config.ADAPTIVE_CURVE_MIN_INNER_PWM) || 45,
-        0,
-        254
-      );
-
-      const maxOuter = this.clamp(
-        Number(this.config.ADAPTIVE_CURVE_MAX_OUTER_PWM) ||
-          Number(this.config.MOTOR_MAX_PWM) ||
-          240,
-        minInner + 1,
-        255
-      );
-
-      // gap = 2 * center * ratio.
-      // ratio tăng liên tục theo curvature + yaw error.
-      const desiredGap =
-        2 * centerPwm * this.adaptiveTurnRatio;
-
-      let inner = centerPwm - desiredGap / 2;
-      let outer = centerPwm + desiredGap / 2;
-
-      // Nếu inner chạm giới hạn, giữ gap bằng cách tiếp tục tăng outer.
-      if (inner < minInner) {
-        inner = minInner;
-        outer = minInner + desiredGap;
-      }
-
-      // Nếu outer chạm max, cố giữ gap bằng cách giảm inner.
-      if (outer > maxOuter) {
-        outer = maxOuter;
-        inner = maxOuter - desiredGap;
-      }
-
-      inner = this.clamp(inner, minInner, maxOuter);
-      outer = this.clamp(outer, minInner, maxOuter);
-
-      let left;
-      let right;
-
-      if (direction < 0) {
-        // LEFT curve
-        left = inner;
-        right = outer;
-      }
-      else {
-        // RIGHT curve
-        left = outer;
-        right = inner;
-      }
-
-      // Giữ correction Precision V2 nếu nó đã mạnh hơn adaptive target
-      // theo cùng hướng.
-      if (direction < 0 && mapped.right > mapped.left) {
-        const mappedGap = mapped.right - mapped.left;
-        if (mappedGap > right - left) {
-          left = mapped.left;
-          right = mapped.right;
-        }
-      }
-      else if (direction > 0 && mapped.left > mapped.right) {
-        const mappedGap = mapped.left - mapped.right;
-        if (mappedGap > left - right) {
-          left = mapped.left;
-          right = mapped.right;
-        }
-      }
-
-      left = Math.round(
-        this.clamp(left, 0, maxOuter)
-      );
-      right = Math.round(
-        this.clamp(right, 0, maxOuter)
-      );
-
-      this.blueCurveTargetGap = Math.abs(left - right);
-      this.updateAdaptiveCurveDebugUi();
-
-      return { left, right };
-    }
-
-    updateAdaptiveCurveDebugUi() {
-      if (typeof document === "undefined") return;
-
-      const severityText =
-        `${this.blueCurveDirection} · ${Math.round((this.blueCurveSeverity || 0) * 100)}%`;
-
-      const ratioText =
-        `${(this.adaptiveTurnRatio || 0).toFixed(2)} · gap ${Math.round(this.blueCurveTargetGap || 0)} PWM`;
-
-      const targetYawText =
-        `${(this.adaptiveTargetYawRate || 0).toFixed(1)}°/s`;
-
-      const actualYawText =
-        `${(this.adaptiveActualYawRate || 0).toFixed(1)}°/s`;
-
-      const severityEl = document.getElementById("visionBlueCurveState");
-      const mainSeverityEl = document.getElementById("blueCurveState");
-      const gapEl = document.getElementById("visionCurveGapState");
-      const mainGapEl = document.getElementById("curveGapState");
-      const ratioEl = document.getElementById("adaptiveRatioState");
-      const targetYawEl = document.getElementById("targetYawRateState");
-      const actualYawEl = document.getElementById("actualYawRateState");
-
-      if (severityEl) severityEl.textContent = severityText;
-      if (mainSeverityEl) mainSeverityEl.textContent = severityText;
-      if (gapEl) gapEl.textContent = ratioText;
-      if (mainGapEl) mainGapEl.textContent = ratioText;
-      if (ratioEl) ratioEl.textContent = ratioText;
-      if (targetYawEl) targetYawEl.textContent = targetYawText;
-      if (actualYawEl) actualYawEl.textContent = actualYawText;
-    }
-
-    updateBlueCurveGapTarget() {
-      const enabled = this.config.BLUE_CURVE_FEEDFORWARD_ENABLE !== false;
-      if (!enabled) {
-        this.blueCurveTargetGap = 0;
-        this.filteredBlueCurveGap = 0;
-        this.updateBlueCurveDebugUi();
-        return;
-      }
-
-      const activate = this.clamp(
-        Number(this.config.BLUE_CURVE_GAP_ACTIVATE_SEVERITY) || 0.12,
-        0,
-        0.95
-      );
-      const minGap = Math.max(0, Number(this.config.BLUE_CURVE_GAP_MIN_PWM) || 20);
-      const maxGap = Math.max(minGap, Number(this.config.BLUE_CURVE_GAP_MAX_PWM) || 70);
-      const exponent = Math.max(0.4, Number(this.config.BLUE_CURVE_GAP_EXPONENT) || 1.10);
-
-      let desired = 0;
-      if (this.blueCurveDirection !== "STRAIGHT" && this.blueCurveSeverity > activate) {
-        const normalized = this.clamp(
-          (this.blueCurveSeverity - activate) / Math.max(0.001, 1 - activate),
-          0,
-          1
-        );
-        desired = minGap + Math.pow(normalized, exponent) * (maxGap - minGap);
-      }
-
-      const alpha = this.clamp(
-        Number(this.config.BLUE_CURVE_GAP_EMA_ALPHA) || 0.42,
-        0.05,
-        1
-      );
-      const maxDelta = Math.max(1, Number(this.config.BLUE_CURVE_GAP_MAX_DELTA_PWM) || 9);
-
-      const emaTarget = this.filteredBlueCurveGap + alpha * (desired - this.filteredBlueCurveGap);
-      const delta = this.clamp(
-        emaTarget - this.filteredBlueCurveGap,
-        -maxDelta,
-        maxDelta
-      );
-      this.filteredBlueCurveGap += delta;
-      this.blueCurveTargetGap = Math.round(this.filteredBlueCurveGap);
-      this.updateBlueCurveDebugUi();
-    }
-
-    applyBlueCurvePwmGap(mapped) {
-      const forwardTrackingState =
-        this.state === NAV_STATE.LINE_FOLLOW;
-
-      if (
-        !forwardTrackingState ||
-        this.config.BLUE_CURVE_FEEDFORWARD_ENABLE === false ||
-        !mapped ||
-        mapped.left <= 0 ||
-        mapped.right <= 0
-      ) {
-        return mapped;
-      }
-
-      const desiredGap = Math.max(
-        0,
-        Math.round(this.blueCurveTargetGap || 0)
-      );
-
-      const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 185,
-        1,
-        255
-      );
-
-      const torqueFloor = this.clamp(
-        Number(this.config.LINE_FOLLOW_TORQUE_FLOOR_PWM) || 70,
-        1,
-        maxPwm
-      );
-
-      const cruisePwm = this.clamp(
-        Number(this.config.MOTOR_CRUISE_PWM) || 98,
-        torqueFloor,
-        maxPwm
-      );
-
-      let left = Math.round(mapped.left);
-      let right = Math.round(mapped.right);
-
-      // ===================================================
-      // DIRECT BLUE-CURVE SPEED PROFILE
-      // ===================================================
-      // Đường xanh là nguồn quyết định hướng cua.
-      // Cua càng gắt:
-      //   - bánh trong giảm dần về torque floor
-      //   - bánh ngoài tăng dần về outer max
-      //
-      // Không reverse trong LINE_FOLLOW.
-      // TURNING 90° vẫn dùng logic -PWM/+PWM riêng.
-      const directEnabled =
-        this.config.BLUE_CURVE_DIRECT_SPEED_ENABLE !== false;
-
-      const activate = this.clamp(
-        Number(this.config.BLUE_CURVE_DIRECT_ACTIVATE_SEVERITY) || 0.15,
-        0,
-        0.95
-      );
-
-      const directExponent = Math.max(
-        0.4,
-        Number(this.config.BLUE_CURVE_DIRECT_EXPONENT) || 0.90
-      );
-
-      const innerAtFull = this.clamp(
-        Number(this.config.BLUE_CURVE_INNER_PWM_AT_FULL_CURVE) || torqueFloor,
-        torqueFloor,
-        cruisePwm
-      );
-
-      const outerAtFull = this.clamp(
-        Number(this.config.BLUE_CURVE_OUTER_PWM_AT_FULL_CURVE) || maxPwm,
-        cruisePwm,
-        maxPwm
-      );
-
-      let curveStrength = 0;
-
-      if (
-        directEnabled &&
-        this.blueCurveDirection !== "STRAIGHT" &&
-        this.blueCurveSeverity > activate
-      ) {
-        const normalized = this.clamp(
-          (this.blueCurveSeverity - activate) /
-            Math.max(0.001, 1 - activate),
-          0,
-          1
-        );
-
-        curveStrength = Math.pow(
-          normalized,
-          directExponent
-        );
-      }
-
-      if (curveStrength > 0) {
-        const innerTarget = Math.round(
-          cruisePwm -
-          curveStrength * (cruisePwm - innerAtFull)
-        );
-
-        const outerTarget = Math.round(
-          cruisePwm +
-          curveStrength * (outerAtFull - cruisePwm)
-        );
-
-        if (this.blueCurveDirection === "LEFT") {
-          // Cua trái:
-          // LEFT  = bánh trong  -> giảm
-          // RIGHT = bánh ngoài -> tăng
-          left = Math.max(
-            torqueFloor,
-            Math.min(left, innerTarget)
-          );
-
-          right = Math.min(
-            maxPwm,
-            Math.max(right, outerTarget)
-          );
-        }
-        else if (this.blueCurveDirection === "RIGHT") {
-          // Cua phải:
-          // RIGHT = bánh trong  -> giảm
-          // LEFT  = bánh ngoài -> tăng
-          right = Math.max(
-            torqueFloor,
-            Math.min(right, innerTarget)
-          );
-
-          left = Math.min(
-            maxPwm,
-            Math.max(left, outerTarget)
-          );
-        }
-      }
-
-      // ===================================================
-      // MINIMUM GAP SAFETY
-      // ===================================================
-      // Sau direct profile, vẫn đảm bảo chênh PWM ít nhất bằng
-      // blueCurveTargetGap. Nếu bánh ngoài chạm max, hạ bánh trong
-      // nhưng không thấp hơn torque floor.
-      if (desiredGap > 0) {
-        if (this.blueCurveDirection === "LEFT") {
-          left = Math.max(left, torqueFloor);
-
-          if (right - left < desiredGap) {
-            right = Math.min(
-              maxPwm,
-              left + desiredGap
-            );
-
-            if (right - left < desiredGap) {
-              left = Math.max(
-                torqueFloor,
-                right - desiredGap
-              );
-            }
-          }
-        }
-        else if (this.blueCurveDirection === "RIGHT") {
-          right = Math.max(right, torqueFloor);
-
-          if (left - right < desiredGap) {
-            left = Math.min(
-              maxPwm,
-              right + desiredGap
-            );
-
-            if (left - right < desiredGap) {
-              right = Math.max(
-                torqueFloor,
-                left - desiredGap
-              );
-            }
-          }
-        }
-      }
-
-      return {
-        left: Math.round(
-          this.clamp(left, 0, maxPwm)
-        ),
-        right: Math.round(
-          this.clamp(right, 0, maxPwm)
-        )
+    resetGeometryControllerDebug() {
+      this.geometryControl = {
+        lateralNorm: 0,
+        headingNorm: 0,
+        curvatureNorm: 0,
+        headingDNorm: 0,
+        rawSteering: 0,
+        steeringCommand: 0,
+        severity: 0,
+        baseSpeed: 0,
+        deltaLogical: 0
       };
+      this.updateGeometryControllerDebug();
+    }
+
+    updateGeometryControllerDebug() {
+      if (typeof document === "undefined") {
+        return;
+      }
+
+      const state = this.geometryControl || {};
+      const lateralPx = Number(this.lastVision?.lineError);
+      const headingDeg =
+        Number.isFinite(Number(this.lastVision?.controlHeadingErrorDeg))
+          ? Number(this.lastVision.controlHeadingErrorDeg)
+          : Number(this.lastVision?.headingErrorDeg);
+      const curvatureDeg = Number(this.lastVision?.curvatureDeg);
+
+      const lateralText = Number.isFinite(lateralPx)
+        ? `${lateralPx >= 0 ? "+" : ""}${lateralPx.toFixed(1)} px`
+        : "-";
+      const headingText = Number.isFinite(headingDeg)
+        ? `${headingDeg >= 0 ? "+" : ""}${headingDeg.toFixed(1)}°`
+        : "-";
+      const curvatureText = Number.isFinite(curvatureDeg)
+        ? `${curvatureDeg >= 0 ? "+" : ""}${curvatureDeg.toFixed(1)}°`
+        : "-";
+
+      const steeringText =
+        `${Number(state.steeringCommand || 0).toFixed(2)}` +
+        ` · sev ${Math.round((state.severity || 0) * 100)}%`;
+
+      const baseText =
+        `${Number(state.baseSpeed || 0).toFixed(1)} logic`;
+      const deltaText =
+        `${Number(state.deltaLogical || 0) >= 0 ? "+" : ""}` +
+        `${Number(state.deltaLogical || 0).toFixed(1)} logic`;
+
+      const set = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+      };
+
+      set("geometryLateralState", lateralText);
+      set("geometryHeadingState", headingText);
+      set("geometryCurvatureState", curvatureText);
+      set("geometrySteeringState", steeringText);
+      set("geometryBaseState", baseText);
+      set("geometryDeltaState", deltaText);
+
+      set("visionGeometrySteeringState", steeringText);
+      set("visionGeometryBaseState", baseText);
+      set("visionGeometryDeltaState", deltaText);
     }
 
     updateBlueCurveDebugUi() {
@@ -2086,7 +1637,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-lane-geometry-v1";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

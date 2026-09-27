@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Adaptive Curve + Short Yellow Guide · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-lane-geometry-v1";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-lane-geometry-v1";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Lane Geometry Soft Control · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -99,11 +99,11 @@ window.APP_CONFIG = {
     VISION_ONE_LINE_MAX_FRAMES: 45,
 
     // Nếu mất cả hai vạch, giữ quỹ đạo cũ tối đa vài frame để tránh giật.
-    VISION_LOST_PREDICT_FRAMES: 4,
+    VISION_LOST_PREDICT_FRAMES: 2,
     VISION_LOST_PREDICT_CONFIDENCE: 0.56,
 
     // Tâm điều khiển được lọc riêng để xe không giật trái/phải liên tục.
-    VISION_CENTER_EMA_ALPHA: 0.20,
+    VISION_CENTER_EMA_ALPHA: 0.34,
     VISION_MAX_CENTER_JUMP_PX: 26,
 
     // Điểm gần dùng để đo lệch ngang và điểm nhìn trước dùng để bắt cua sớm.
@@ -111,14 +111,15 @@ window.APP_CONFIG = {
     VISION_NEAR_Y_RATIO: 0.88,
     VISION_LOOKAHEAD_Y_RATIO: 0.42,
 
-    // Short yellow local-heading guide.
-    // 0.08 = chỉ nhìn trước khoảng 8% chiều cao ROI từ điểm near.
-    // Hai đầu đoạn vàng đều lấy trực tiếp từ centerCurve xanh.
+    // Tiếp tuyến cục bộ của đường xanh: sample một đoạn ngắn trên centerCurve.
+    // Chỉ dùng để tính heading error; đường vàng trên UI KHÔNG nằm trên curve.
     VISION_LOCAL_HEADING_T_DELTA: 0.08,
 
-    // Steering tức thời ưu tiên tiếp tuyến cục bộ ngắn để ôm đường xanh.
-    // 0.75 local + 0.25 long look-ahead.
-    VISION_LOCAL_HEADING_CONTROL_WEIGHT: 0.75,
+    // Heading điều khiển ưu tiên tiếp tuyến cục bộ, nhưng giữ một phần look-ahead xa.
+    VISION_LOCAL_HEADING_CONTROL_WEIGHT: 0.80,
+
+    // Đường vàng là HƯỚNG CAMERA thật: đoạn thẳng đứng, rất ngắn tại tâm camera.
+    VISION_CAMERA_HEADING_LENGTH_RATIO: 0.06,
 
     // Confidence thấp thì navigation giảm tốc hoặc dừng.
     VISION_MIN_CONFIDENCE: 0.38,
@@ -145,17 +146,17 @@ window.APP_CONFIG = {
     // MOTOR_MIN_RUN_PWM: PWM nhỏ nhất dùng khi bánh cần quay.
     // MOTOR_CRUISE_PWM : PWM chạy thẳng mặc định.
     // START_BOOST đang tắt (0 ms); chỉ bật lại nếu thực tế vẫn khó đề-pa.
-    MOTOR_MIN_RUN_PWM: 50,
-    MOTOR_CRUISE_PWM: 98,
-    MOTOR_START_BOOST_PWM: 112,
+    MOTOR_MIN_RUN_PWM: 52,
+    MOTOR_CRUISE_PWM: 102,
+    MOTOR_START_BOOST_PWM: 116,
     MOTOR_START_BOOST_MS: 0,
-    MOTOR_MAX_PWM: 240,
+    MOTOR_MAX_PWM: 230,
 
 
     // Giá trị logic cực nhỏ được coi là STOP.
     MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
 
-    MIN_CURVE_SPEED: 44,
+    MIN_CURVE_SPEED: 42,
 
     // pathAngle là góc vector:
     //   center xanh gần xe -> điểm hồng look-ahead
@@ -208,103 +209,65 @@ window.APP_CONFIG = {
     LOST_PREDICT_STEERING_GAIN: 0.82,
 
     // Không cho PWM nhảy quá nhiều giữa hai lần publish MQTT.
-    MOTOR_MAX_DELTA_PER_UPDATE: 7,
+    MOTOR_MAX_DELTA_PER_UPDATE: 14,
 
     // Khi bám line bình thường không đảo chiều bánh trong cua. Hộp số 1/120
     // đủ mô-men để cua bằng cách giảm bánh trong thay vì reverse.
-    LINE_FOLLOW_MIN_LOGICAL_SPEED: 6,
+    LINE_FOLLOW_MIN_LOGICAL_SPEED: 1,
 
     // Chỉ là ngưỡng mô-men vật lý cho LINE_FOLLOW.
     // KHÔNG thay đổi PID / baseSpeed / correction của precision-v2.
     // Nếu một bánh đang tiến nhưng PWM sau mapping thấp hơn mức này,
     // nâng bánh đó lên floor và nâng bánh còn lại cùng lượng để giữ chênh steering.
-    LINE_FOLLOW_TORQUE_FLOOR_PWM: 70,
+    LINE_FOLLOW_TORQUE_FLOOR_PWM: 0,
 
     // ===================================================
-    // BLUE-CURVE FEED-FORWARD
+    // LANE GEOMETRY SOFT CONTROLLER
     // ===================================================
-    // Đường center màu xanh dương là quỹ đạo điều khiển duy nhất.
-    // Severity được tính trực tiếp từ hình học centerCurve xanh:
-    // heading gần->lookahead, độ uốn của curve và độ lệch lookahead.
-    // Cua càng gắt -> yêu cầu chênh PWM trái/phải tối thiểu càng lớn.
-    BLUE_CURVE_FEEDFORWARD_ENABLE: false,
+    // LINE_FOLLOW chỉ dùng camera:
+    //   1) lateral error  = center xanh gần robot - tâm camera
+    //   2) heading error  = tiếp tuyến cục bộ của đường xanh - hướng camera
+    //   3) curvature      = thay đổi heading dọc đường xanh
+    //
+    // Không hard-code cặp PWM theo severity.
+    // Các sai số được chuẩn hoá -> weighted sum -> tanh() để tăng steering
+    // liên tục nhưng không nhảy vô hạn.
+    LANE_GEOMETRY_CONTROL_ENABLE: true,
 
-    // Khi severity dưới mức này, không ép thêm PWM gap.
-    BLUE_CURVE_GAP_ACTIVATE_SEVERITY: 0.12,
+    // Mức sai số được coi là "đầy thang" khi chuẩn hoá.
+    LANE_LATERAL_FULL_RATIO: 0.18,
+    LANE_HEADING_FULL_DEG: 20,
+    LANE_CURVATURE_FULL_DEG: 10,
+    LANE_HEADING_D_FULL_DEG_S: 140,
 
-    // Cua vừa/gắt sẽ nội suy gap từ MIN tới MAX.
-    // Với torque floor 70, cua rất gắt thường sẽ tiến tới khoảng 70/140.
-    BLUE_CURVE_GAP_MIN_PWM: 24,
-    BLUE_CURVE_GAP_MAX_PWM: 115,
-    BLUE_CURVE_GAP_EXPONENT: 0.90,
+    // Trọng số. Heading là thành phần chính; lateral giữ robot ở giữa lane;
+    // curvature là feed-forward để bắt cua sớm; D giảm overshoot.
+    LANE_WEIGHT_LATERAL: 0.80,
+    LANE_WEIGHT_HEADING: 1.35,
+    LANE_WEIGHT_CURVATURE: 0.72,
+    LANE_WEIGHT_HEADING_D: 0.14,
 
-    // Làm mượt gap để không giật khi severity thay đổi giữa các frame.
-    BLUE_CURVE_GAP_EMA_ALPHA: 0.52,
-    BLUE_CURVE_GAP_MAX_DELTA_PWM: 14,
+    // Soft saturation. Nhỏ hơn -> steering mạnh sớm hơn; lớn hơn -> mềm hơn.
+    LANE_STEERING_SOFT_SCALE: 1.00,
 
-    // Strong-turn profile:
-    // Ngoài việc ép PWM gap, trực tiếp kéo bánh trong xuống và bánh ngoài lên
-    // theo độ cong của chính đường xanh.
-    // severity = 100%:
-    //   LEFT  -> khoảng 70 / 185
-    //   RIGHT -> khoảng 185 / 70
-    BLUE_CURVE_DIRECT_SPEED_ENABLE: false,
-    BLUE_CURVE_DIRECT_ACTIVATE_SEVERITY: 0.15,
-    BLUE_CURVE_DIRECT_EXPONENT: 0.90,
-    BLUE_CURVE_INNER_PWM_AT_FULL_CURVE: 70,
-    BLUE_CURVE_OUTER_PWM_AT_FULL_CURVE: 185,
+    // Steering authority thay đổi liên tục theo độ gắt.
+    // Đây là delta LOGIC, không phải cặp PWM cố định.
+    LANE_STEERING_MIN_DELTA_LOGICAL: 10,
+    LANE_STEERING_MAX_DELTA_LOGICAL: 110,
+    LANE_STEERING_DELTA_EXPONENT: 0.88,
 
-    // Chuẩn hoá severity từ chính đường xanh.
-    BLUE_CURVE_HEADING_FULL_DEG: 13,
-    BLUE_CURVE_BEND_FULL_DEG: 8,
-    BLUE_CURVE_LATERAL_FULL_RATIO: 0.11,
+    // Blue severity cũng tham gia giảm tốc nền ở cua.
+    LANE_CURVE_SPEED_SEVERITY_WEIGHT: 1.00,
 
-    // ===================================================
-    // ADAPTIVE CURVATURE CONTROLLER
-    // ===================================================
-    // Không gán cứng severity=100% thành một cặp PWM cụ thể.
-    // Đường xanh tạo turn ratio liên tục. Gyro đo robot quay thực tế
-    // và tự tăng/giảm steering khi robot understeer/oversteer.
-    ADAPTIVE_CURVE_ENABLE: true,
+    // Khi curve rõ ràng, bảo vệ dấu steering để lateral error không lật hướng
+    // trừ khi robot đã lệch tâm cực lớn.
+    LANE_DIRECTION_LOCK_SEVERITY: 0.28,
+    LANE_DIRECTION_LOCK_MIN_DELTA_LOGICAL: 8,
+    LANE_DIRECTION_OVERRIDE_LATERAL: 0.88,
 
-    // Dưới mức này coi gần như thẳng và giữ output Precision V2.
-    ADAPTIVE_CURVE_ACTIVATE_SEVERITY: 0.06,
-
-    // Hình học đường xanh -> turn ratio.
-    // ratio=0: hai bên bằng nhau.
-    // ratio=1: bánh trong có thể tiến gần 0 trong mô hình động học.
-    // >1 cho phép cua rất gắt nhưng LINE_FOLLOW vẫn không reverse.
-    ADAPTIVE_CURVE_MAX_TURN_RATIO: 1.45,
-    ADAPTIVE_CURVE_EXPONENT: 1.05,
-
-    // PWM nhỏ nhất mà adaptive controller được phép yêu cầu cho bánh trong.
-    // Đây là GIỚI HẠN PHẦN CỨNG, không phải tốc độ cua hard-code.
-    // Nếu motor của bạn vẫn quay ổn ở PWM thấp hơn, có thể giảm tiếp.
-    ADAPTIVE_CURVE_MIN_INNER_PWM: 45,
-
-    // Giới hạn output vật lý. Bánh ngoài có thể tự tăng tới mức này
-    // khi đường cong yêu cầu hoặc gyro báo robot quay chưa đủ.
-    ADAPTIVE_CURVE_MAX_OUTER_PWM: 240,
-
-    // Giới hạn tốc độ thay đổi của turn ratio giữa hai vòng điều khiển
-    // để tránh giật mạnh khi camera noise.
-    ADAPTIVE_CURVE_RATIO_MAX_DELTA: 0.10,
-
-    // ---------------- Gyro closed-loop ----------------
-    ADAPTIVE_YAW_FEEDBACK_ENABLE: true,
-
-    // Curve severity -> yaw-rate mục tiêu. Đây không phải PWM cố định:
-    // PWM được tự điều chỉnh cho tới khi yaw-rate thực tế tiến gần mục tiêu.
-    ADAPTIVE_YAW_RATE_MAX_DEG_S: 95,
-    ADAPTIVE_YAW_RATE_EXPONENT: 1.00,
-
-    // Low-pass cho yaw-rate đo từ DeviceOrientation.
-    ADAPTIVE_YAW_RATE_EMA_ALPHA: 0.26,
-
-    // Feedback gain: understeer -> tăng ratio; oversteer -> giảm ratio.
-    ADAPTIVE_YAW_KP: 0.0070,
-    ADAPTIVE_YAW_KI: 0.0008,
-    ADAPTIVE_YAW_INTEGRAL_LIMIT: 45,
+    // Gyro KHÔNG điều khiển LINE_FOLLOW.
+    // Gyro vẫn được giữ nguyên cho TURNING QR ~90°.
+    ADAPTIVE_YAW_FEEDBACK_ENABLE: false,
 
     // Không sử dụng frame camera quá cũ để tiếp tục lái.
     VISION_MAX_FRAME_AGE_MS: 160,
@@ -355,6 +318,6 @@ window.APP_CONFIG = {
     LINE_LOST_STOP_MS: 650,
 
     // Tần số gửi lệnh motor lên HiveMQ.
-    MOTOR_INTERVAL_MS: 40
+    MOTOR_INTERVAL_MS: 60
   }
 };

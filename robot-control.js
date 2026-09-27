@@ -334,10 +334,17 @@
           : "-"
       );
 
+      const controlHeading =
+        frame?.controlHeadingErrorDeg != null
+          ? Number(frame.controlHeadingErrorDeg)
+          : frame?.headingErrorDeg != null
+            ? Number(frame.headingErrorDeg)
+            : null;
+
       setText(
         "visionHeadingState",
-        frame?.headingErrorDeg != null
-          ? `${frame.headingErrorDeg >= 0 ? "+" : ""}${frame.headingErrorDeg.toFixed(1)}°`
+        controlHeading != null && Number.isFinite(controlHeading)
+          ? `${controlHeading >= 0 ? "+" : ""}${controlHeading.toFixed(1)}° · yellow=0°`
           : "-"
       );
 

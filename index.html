@@ -236,10 +236,12 @@
           <div><span>Lane width</span><b id="visionLaneWidthState">-</b></div>
           <div><span>Look-ahead X</span><b id="visionTargetState">-</b></div>
 
-          <div><span>Heading error</span><b id="visionHeadingState">-</b></div>
+          <div><span>Blue tangent / camera</span><b id="visionHeadingState">-</b></div>
           <div><span>Curvature</span><b id="visionCurvatureState">-</b></div>
           <div><span>Blue curve</span><b id="visionBlueCurveState">-</b></div>
-          <div><span>Target PWM gap</span><b id="visionCurveGapState">0 PWM</b></div>
+          <div><span>Steering soft</span><b id="visionGeometrySteeringState">0.00</b></div>
+          <div><span>Base logical</span><b id="visionGeometryBaseState">0</b></div>
+          <div><span>Delta logical</span><b id="visionGeometryDeltaState">0</b></div>
 
           <div><span>QR</span><b id="visionQrState">-</b></div>
           <div><span>QR diện tích</span><b id="visionQrAreaState">-</b></div>
@@ -251,7 +253,7 @@
           <div><span>Firmware ESP32</span><b id="visionFirmwareBuildState">chưa nhận</b></div>
           <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
           <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
-          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Precision V2 · Adaptive Curve + Short Yellow Guide · 4-Motor</b></div>
+          <div><span>Source build</span>P26-09-27 · Precision V2 · Lane Geometry Soft Control · 4-Motor</b></div>
           <div><span>Config / Vision / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
@@ -415,20 +417,28 @@
             <b id="blueCurveState">-</b>
           </div>
           <div>
-            <span>Target PWM gap / ratio</span>
-            <b id="curveGapState">0 PWM</b>
+            <span>Lateral error</span>
+            <b id="geometryLateralState">-</b>
           </div>
           <div>
-            <span>Adaptive turn ratio</span>
-            <b id="adaptiveRatioState">0.00</b>
+            <span>Heading error</span>
+            <b id="geometryHeadingState">-</b>
           </div>
           <div>
-            <span>Yaw-rate mục tiêu</span>
-            <b id="targetYawRateState">0.0°/s</b>
+            <span>Curvature</span>
+            <b id="geometryCurvatureState">-</b>
           </div>
           <div>
-            <span>Yaw-rate thực tế</span>
-            <b id="actualYawRateState">0.0°/s</b>
+            <span>Steering soft</span>
+            <b id="geometrySteeringState">0.00</b>
+          </div>
+          <div>
+            <span>Base logical</span>
+            <b id="geometryBaseState">0</b>
+          </div>
+          <div>
+            <span>Delta logical</span>
+            <b id="geometryDeltaState">0</b>
           </div>
           <div>
             <span>Lý do motor</span>
@@ -440,7 +450,7 @@
           </div>
           <div>
             <span>Source build</span>
-            <b id="sourceBuildState">2026-09-27 · Precision V2 · Adaptive Curve + Short Yellow Guide · 4-Motor</b>
+            P26-09-27 · Precision V2 · Lane Geometry Soft Control · 4-Motor</b>
           </div>
           <div>
             <span>Config / Vision / Navigation</span>
@@ -658,20 +668,20 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20260927-local-heading-v2-fix1"></script>
+<script src="config.js?v=20260927-lane-geometry-v1"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
-<script src="audio.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="gemini-live.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="mqtt-robot.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="orientation.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="vision.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="navigation.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="app.js?v=20260927-local-heading-v2-fix1"></script>
-<script src="robot-control.js?v=20260927-local-heading-v2-fix1"></script>
+<script src="audio.js?v=20260927-lane-geometry-v1"></script>
+<script src="gemini-live.js?v=20260927-lane-geometry-v1"></script>
+<script src="mqtt-robot.js?v=20260927-lane-geometry-v1"></script>
+<script src="orientation.js?v=20260927-lane-geometry-v1"></script>
+<script src="vision.js?v=20260927-lane-geometry-v1"></script>
+<script src="navigation.js?v=20260927-lane-geometry-v1"></script>
+<script src="app.js?v=20260927-lane-geometry-v1"></script>
+<script src="robot-control.js?v=20260927-lane-geometry-v1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
