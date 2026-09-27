@@ -575,7 +575,7 @@
       if (
         !frame?.hasLane ||
         frame.lineError == null ||
-        frame.headingErrorDeg == null ||
+        (frame.controlHeadingErrorDeg == null && frame.headingErrorDeg == null) ||
         frame.laneCenter == null ||
         frame.lookAheadCenter == null
       ) {
@@ -649,7 +649,14 @@
       const laneCenter = Number(frame.laneCenter);
       const lookAheadCenter = Number(frame.lookAheadCenter);
       const curveDx = lookAheadCenter - laneCenter;
-      const pathAngleDeg = Number(frame.headingErrorDeg) || 0;
+
+      // Steering tức thời bám đoạn vàng cục bộ rất ngắn,
+      // vẫn được blend nhẹ với look-ahead dài trong vision.js.
+      const pathAngleDeg =
+        Number.isFinite(Number(frame.controlHeadingErrorDeg))
+          ? Number(frame.controlHeadingErrorDeg)
+          : Number(frame.headingErrorDeg) || 0;
+
       const curvatureDeg = Number(frame.curvatureDeg) || 0;
       const frameWidth = Math.max(1, Number(frame.width) || 1);
 
@@ -2079,7 +2086,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

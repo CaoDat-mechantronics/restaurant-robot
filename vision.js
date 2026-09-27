@@ -1309,6 +1309,19 @@
         nearT - 0.08
       );
 
+      // Đoạn vàng rất ngắn, nằm trực tiếp trên centerCurve xanh.
+      const localHeadingDeltaT = this.clamp(
+        Number(this.config.VISION_LOCAL_HEADING_T_DELTA) || 0.08,
+        0.035,
+        0.18
+      );
+
+      const localHeadingT = this.clamp(
+        nearT - localHeadingDeltaT,
+        Math.max(lookAheadT, 0.08),
+        nearT - 0.025
+      );
+
       const maxFitRms = Math.max(
         4,
         Number(this.config.VISION_MAX_FIT_RMS_PX) || 18
@@ -1495,11 +1508,13 @@
 
       let geometricNearCenter = null;
       let geometricLookAheadCenter = null;
+      let geometricLocalHeadingCenter = null;
       let laneWidthNear = null;
 
       if (curvesUsable) {
         geometricNearCenter = this.evalCurve(centerCurve, nearT);
         geometricLookAheadCenter = this.evalCurve(centerCurve, lookAheadT);
+        geometricLocalHeadingCenter = this.evalCurve(centerCurve, localHeadingT);
         laneWidthNear =
           this.evalCurve(rightCurve, nearT) -
           this.evalCurve(leftCurve, nearT);
@@ -1554,8 +1569,12 @@
 
       const nearY = roiTop + nearT * roiHeight;
       const lookAheadY = roiTop + lookAheadT * roiHeight;
-      const verticalDistance = Math.max(1, nearY - lookAheadY);
+      const localHeadingY = roiTop + localHeadingT * roiHeight;
 
+      const verticalDistance = Math.max(1, nearY - lookAheadY);
+      const localVerticalDistance = Math.max(1, nearY - localHeadingY);
+
+      // Heading dài: vẫn giữ để nhìn trước / đánh giá độ cong.
       const headingErrorDeg =
         Number.isFinite(laneCenter) && Number.isFinite(lookAheadCenter)
           ? Math.atan2(
@@ -1563,6 +1582,32 @@
               verticalDistance
             ) * 180 / Math.PI
           : null;
+
+      // Heading cục bộ: hai đầu đều nằm trực tiếp trên centerCurve xanh.
+      // Đoạn cực ngắn nên gần với tiếp tuyến của đường xanh ngay trước robot.
+      const localHeadingErrorDeg =
+        Number.isFinite(geometricNearCenter) &&
+        Number.isFinite(geometricLocalHeadingCenter)
+          ? Math.atan2(
+              geometricLocalHeadingCenter - geometricNearCenter,
+              localVerticalDistance
+            ) * 180 / Math.PI
+          : null;
+
+      const localHeadingWeight = this.clamp(
+        Number(this.config.VISION_LOCAL_HEADING_CONTROL_WEIGHT) || 0.75,
+        0,
+        1
+      );
+
+      const controlHeadingErrorDeg =
+        Number.isFinite(localHeadingErrorDeg) &&
+        Number.isFinite(headingErrorDeg)
+          ? localHeadingWeight * localHeadingErrorDeg +
+            (1 - localHeadingWeight) * headingErrorDeg
+          : Number.isFinite(localHeadingErrorDeg)
+            ? localHeadingErrorDeg
+            : headingErrorDeg;
 
       let curvatureDeg = null;
 
@@ -1773,6 +1818,11 @@
         rawLineError,
         lineError,
         headingErrorDeg,
+        localHeadingErrorDeg,
+        controlHeadingErrorDeg,
+        localHeadingCenter: Number.isFinite(geometricLocalHeadingCenter)
+          ? geometricLocalHeadingCenter
+          : null,
         curvatureDeg,
         blueCurveSeverity,
         blueCurveDirection,
@@ -1780,8 +1830,10 @@
 
         nearT,
         lookAheadT,
+        localHeadingT,
         nearY,
         lookAheadY,
+        localHeadingY,
 
         rawThresholds: binary.rawThresholds,
         thresholds: binary.thresholds,
@@ -1928,6 +1980,45 @@
         3
       );
 
+      // ---------------------------------------------------
+      // SHORT YELLOW LOCAL-HEADING GUIDE
+      // ---------------------------------------------------
+      // Đây KHÔNG phải trục camera dài.
+      // Hai đầu đoạn vàng đều nằm trên centerCurve xanh:
+      // near point -> local heading point.
+      // Vì rất ngắn, đoạn này xấp xỉ tiếp tuyến cục bộ của đường xanh.
+      if (
+        Number.isFinite(lane.laneCenter) &&
+        Number.isFinite(lane.localHeadingCenter) &&
+        Number.isFinite(lane.nearY) &&
+        Number.isFinite(lane.localHeadingY)
+      ) {
+        ctx.save();
+        ctx.strokeStyle = "#fdb022";
+        ctx.lineWidth = 4;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(lane.laneCenter, lane.nearY);
+        ctx.lineTo(
+          lane.localHeadingCenter,
+          lane.localHeadingY
+        );
+        ctx.stroke();
+
+        // Điểm đầu đoạn vàng trên đường xanh.
+        ctx.fillStyle = "#fdb022";
+        ctx.beginPath();
+        ctx.arc(
+          lane.localHeadingCenter,
+          lane.localHeadingY,
+          4,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        ctx.restore();
+      }
+
       // Điểm near + lookahead dùng thật cho controller.
       if (Number.isFinite(lane.laneCenter)) {
         ctx.fillStyle = "#53b1fd";
@@ -1981,7 +2072,8 @@
         `Mode: ${lane.trackMode || "-"}`,
         `Otsu T: ${thresholds || "-"} · dark ${(lane.darkRatio * 100).toFixed(1)}%`,
         `Conf: ${(lane.laneConfidence * 100).toFixed(0)}% · width ${lane.laneWidth != null ? lane.laneWidth.toFixed(0) : "-"}px`,
-        `Err: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px · head ${lane.headingErrorDeg != null ? lane.headingErrorDeg.toFixed(1) : "-"}°`,
+        `Err: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px · long ${lane.headingErrorDeg != null ? lane.headingErrorDeg.toFixed(1) : "-"}°`,
+        `Yellow local: ${lane.localHeadingErrorDeg != null ? lane.localHeadingErrorDeg.toFixed(1) : "-"}° · control ${lane.controlHeadingErrorDeg != null ? lane.controlHeadingErrorDeg.toFixed(1) : "-"}°`,
         `Blue curve: ${lane.blueCurveDirection || "-"} · ${lane.blueCurveSeverity != null ? (lane.blueCurveSeverity * 100).toFixed(0) : "-"}%`
       ];
 
@@ -2210,7 +2302,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
+  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

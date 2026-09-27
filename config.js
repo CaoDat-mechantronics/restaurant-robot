@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v1";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Adaptive Curve + Gyro · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-adaptive-curve-yaw-v2-local-heading";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Adaptive Curve + Short Yellow Guide · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -110,6 +110,15 @@ window.APP_CONFIG = {
     // 0 = đầu ROI (xa), 1 = cuối ROI (gần robot).
     VISION_NEAR_Y_RATIO: 0.88,
     VISION_LOOKAHEAD_Y_RATIO: 0.42,
+
+    // Short yellow local-heading guide.
+    // 0.08 = chỉ nhìn trước khoảng 8% chiều cao ROI từ điểm near.
+    // Hai đầu đoạn vàng đều lấy trực tiếp từ centerCurve xanh.
+    VISION_LOCAL_HEADING_T_DELTA: 0.08,
+
+    // Steering tức thời ưu tiên tiếp tuyến cục bộ ngắn để ôm đường xanh.
+    // 0.75 local + 0.25 long look-ahead.
+    VISION_LOCAL_HEADING_CONTROL_WEIGHT: 0.75,
 
     // Confidence thấp thì navigation giảm tốc hoặc dừng.
     VISION_MIN_CONFIDENCE: 0.38,
