@@ -1,4 +1,5 @@
 (() => {
+  window.ROBOT_MQTT_BUILD = "2026-09-27-4motor-mqtt-v1";
   class RobotMqttBridge {
     constructor({
       config,

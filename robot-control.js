@@ -1,4 +1,5 @@
 (() => {
+  window.ROBOT_CONTROL_BUILD = "2026-09-27-4motor-mqtt-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -466,6 +467,38 @@
           `ESP32 ACK command=${payload.command_id} ` +
           `table=${payload.table} line=${payload.line} stop=${payload.stop_index}`
         );
+        return;
+      }
+
+      if (payload?.type === "motor_state") {
+        const left = Number(payload.left ?? 0);
+        const right = Number(payload.right ?? 0);
+        const lf = Number(payload.lf ?? left);
+        const lr = Number(payload.lr ?? left);
+        const rf = Number(payload.rf ?? right);
+        const rr = Number(payload.rr ?? right);
+        const seq = Number(payload.seq ?? 0);
+        const fw = String(payload.firmware_build || "unknown");
+
+        const sideText = `L=${left} · R=${right} · seq=${seq}`;
+        const motorText = `LF=${lf} · LR=${lr} · RF=${rf} · RR=${rr}`;
+
+        if ($("appliedSideState")) $("appliedSideState").textContent = sideText;
+        if ($("visionAppliedSideState")) $("visionAppliedSideState").textContent = sideText;
+
+        if ($("appliedMotorsState")) $("appliedMotorsState").textContent = motorText;
+        if ($("visionAppliedMotorsState")) $("visionAppliedMotorsState").textContent = motorText;
+
+        if ($("firmwareBuildState")) $("firmwareBuildState").textContent = fw;
+        if ($("visionFirmwareBuildState")) $("visionFirmwareBuildState").textContent = fw;
+
+        return;
+      }
+
+      if (payload?.type === "heartbeat" && payload?.firmware_build) {
+        const fw = String(payload.firmware_build);
+        if ($("firmwareBuildState")) $("firmwareBuildState").textContent = fw;
+        if ($("visionFirmwareBuildState")) $("visionFirmwareBuildState").textContent = fw;
       }
     },
     onDebug: log
