@@ -632,7 +632,7 @@
       // ===================================================
       // 4) Tốc độ cơ sở: cua gấp -> giảm tốc
       // ===================================================
-      const configuredBase = Number(this.config.BASE_SPEED) || 96;
+      const configuredBase = Number(this.config.BASE_SPEED) || 92;
       const minCurveSpeed = Math.min(
         configuredBase,
         Number(this.config.MIN_CURVE_SPEED) || 44
@@ -833,7 +833,7 @@
 
       const maxCorrection = Math.max(
         10,
-        Number(this.config.MAX_STEERING_CORRECTION) || 58
+        Number(this.config.MAX_STEERING_CORRECTION) || 60
       );
 
       // Với hộp số 1/120, khi baseSpeed đã giảm ở cua thì steering cũng
@@ -847,7 +847,7 @@
         0,
         Number.isFinite(configuredMinForwardForLimit)
           ? configuredMinForwardForLimit
-          : 6
+          : 4
       );
       const speedAwareMaxCorrection = Math.max(
         10,
@@ -878,7 +878,7 @@
         0,
         Number.isFinite(configuredMinForward)
           ? configuredMinForward
-          : 6
+          : 4
       );
 
       const leftTarget = this.clamp(
@@ -1040,7 +1040,7 @@
 
       const base = Math.min(
         88,
-        Number(this.config.BASE_SPEED) || 96
+        Number(this.config.BASE_SPEED) || 92
       );
 
       const positionKp = Number(this.config.POSITION_KP) || 0.075;
@@ -1162,7 +1162,7 @@
       if (!force) {
         const maxDelta = Math.max(
           1,
-          Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 7
+          Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 8
         );
 
         const deltaLeft = nextLeft - this.lastLogicalMotor.left;
@@ -1257,6 +1257,7 @@
     // Khác bản cũ: không ép cả hai bánh luôn >= MOTOR_CRUISE_PWM.
     // Mỗi bánh được map độc lập theo magnitude logic:
     //
+    //   logical rất nhỏ ở bánh trong cua -> 0 (coast, chỉ LINE_FOLLOW)
     //   logical nhỏ          -> MOTOR_MIN_RUN_PWM
     //   logical = BASE_SPEED -> MOTOR_CRUISE_PWM
     //   logical = MAX_SPEED  -> MOTOR_MAX_PWM
@@ -1271,27 +1272,72 @@
         Number(this.config.MOTOR_ZERO_CUTOFF_LOGICAL) || 0.5
       );
 
-      const leftValue = Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
-      const rightValue = Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
+      let leftValue = Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
+      let rightValue = Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
 
       if (leftValue === 0 && rightValue === 0) {
         return { left: 0, right: 0 };
       }
 
+      // ---------------------------------------------------
+      // INNER-WHEEL COAST - chỉ dùng khi đang LINE_FOLLOW.
+      //
+      // Vấn đề thực tế với hộp số 1/120:
+      // controller có thể yêu cầu logical 4..10 cho bánh trong cua,
+      // nhưng mapping cũ lại ép bánh đó lên MOTOR_MIN_RUN_PWM (~60),
+      // khiến cả hai bên vẫn kéo mạnh và xe gần như đi thẳng.
+      //
+      // Khi một bánh rất chậm và bánh còn lại nhanh hơn đủ nhiều,
+      // cho bánh trong về 0 để tạo moment quay rõ ràng.
+      // Không áp dụng trong TURNING nên quay gyro -PWM/+PWM vẫn giữ nguyên.
+      // ---------------------------------------------------
+      if (this.state === NAV_STATE.LINE_FOLLOW) {
+        const coastThreshold = Math.max(
+          0,
+          Number(this.config.INNER_WHEEL_COAST_LOGICAL) || 16
+        );
+        const coastMinGap = Math.max(
+          0,
+          Number(this.config.INNER_WHEEL_COAST_MIN_GAP_LOGICAL) || 24
+        );
+
+        const sameForwardDirection = leftValue >= 0 && rightValue >= 0;
+
+        if (sameForwardDirection) {
+          const leftMag = Math.abs(leftValue);
+          const rightMag = Math.abs(rightValue);
+
+          if (
+            leftMag > 0 &&
+            leftMag <= coastThreshold &&
+            rightMag - leftMag >= coastMinGap
+          ) {
+            leftValue = 0;
+          }
+          else if (
+            rightMag > 0 &&
+            rightMag <= coastThreshold &&
+            leftMag - rightMag >= coastMinGap
+          ) {
+            rightValue = 0;
+          }
+        }
+      }
+
       const minRunPwm = this.clamp(
-        Number(this.config.MOTOR_MIN_RUN_PWM) || 62,
+        Number(this.config.MOTOR_MIN_RUN_PWM) || 50,
         1,
         254
       );
 
       const cruisePwm = this.clamp(
-        Number(this.config.MOTOR_CRUISE_PWM) || 98,
+        Number(this.config.MOTOR_CRUISE_PWM) || 92,
         minRunPwm,
         254
       );
 
       const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 165,
+        Number(this.config.MOTOR_MAX_PWM) || 155,
         cruisePwm,
         255
       );
@@ -1338,7 +1384,7 @@
 
       const logicalBase = Math.max(
         1,
-        Number(this.config.BASE_SPEED) || 96
+        Number(this.config.BASE_SPEED) || 92
       );
       const logicalMax = Math.max(
         logicalBase + 1,

@@ -115,7 +115,7 @@ window.APP_CONFIG = {
     // ---------------------------------------------------
     // PATH FOLLOW CONTROLLER - ƯU TIÊN ĐIỂM HỒNG LOOK-AHEAD
     // ---------------------------------------------------
-    BASE_SPEED: 96,
+    BASE_SPEED: 92,
 
     // Thang tốc độ LOGIC nội bộ. Với hộp số 1/120 không cần đẩy quá cao;
     // vẫn giữ đủ khoảng điều khiển để tạo chênh lệch trái/phải mượt.
@@ -132,17 +132,17 @@ window.APP_CONFIG = {
     // MOTOR_MIN_RUN_PWM: PWM nhỏ nhất dùng khi bánh cần quay.
     // MOTOR_CRUISE_PWM : PWM chạy thẳng mặc định.
     // START_BOOST đang tắt (0 ms); chỉ bật lại nếu thực tế vẫn khó đề-pa.
-    MOTOR_MIN_RUN_PWM: 62,
-    MOTOR_CRUISE_PWM: 98,
+    MOTOR_MIN_RUN_PWM: 50,
+    MOTOR_CRUISE_PWM: 92,
     MOTOR_START_BOOST_PWM: 112,
     MOTOR_START_BOOST_MS: 0,
-    MOTOR_MAX_PWM: 165,
+    MOTOR_MAX_PWM: 155,
 
 
     // Giá trị logic cực nhỏ được coi là STOP.
     MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
 
-    MIN_CURVE_SPEED: 44,
+    MIN_CURVE_SPEED: 40,
 
     // pathAngle là góc vector:
     //   center xanh gần xe -> điểm hồng look-ahead
@@ -181,7 +181,7 @@ window.APP_CONFIG = {
     PATH_FULL_SLOWDOWN_DEG: 15,
 
     // Không cho correction lái vượt quá mức này (PWM).
-    MAX_STEERING_CORRECTION: 58,
+    MAX_STEERING_CORRECTION: 60,
 
     // Lệch tâm tới tỷ lệ này của bề rộng frame thì giảm tốc mạnh.
     CENTER_FULL_SLOWDOWN_RATIO: 0.20,
@@ -195,11 +195,17 @@ window.APP_CONFIG = {
     LOST_PREDICT_STEERING_GAIN: 0.82,
 
     // Không cho PWM nhảy quá nhiều giữa hai lần publish MQTT.
-    MOTOR_MAX_DELTA_PER_UPDATE: 7,
+    MOTOR_MAX_DELTA_PER_UPDATE: 8,
 
     // Khi bám line bình thường không đảo chiều bánh trong cua. Hộp số 1/120
     // đủ mô-men để cua bằng cách giảm bánh trong thay vì reverse.
-    LINE_FOLLOW_MIN_LOGICAL_SPEED: 6,
+    LINE_FOLLOW_MIN_LOGICAL_SPEED: 4,
+
+    // Nếu controller muốn bánh trong chạy rất chậm trong LINE_FOLLOW,
+    // cho bánh đó coast/STOP thay vì ép lên MOTOR_MIN_RUN_PWM.
+    // Chỉ kích hoạt khi bánh ngoài nhanh hơn đủ nhiều để tránh dừng cả hai bánh.
+    INNER_WHEEL_COAST_LOGICAL: 16,
+    INNER_WHEEL_COAST_MIN_GAP_LOGICAL: 24,
 
     // Cảm biến IR của bạn là active-low:
     // true  = nền đường / có tín hiệu
