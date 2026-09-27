@@ -1,3 +1,7 @@
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-precision-v2-minimal-torque-ui1";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-precision-v2-minimal-torque-ui1";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Gear120 Precision V2 · Torque70";
+
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
   DEFAULT_ROBOT: 1,
@@ -115,7 +119,7 @@ window.APP_CONFIG = {
     // ---------------------------------------------------
     // PATH FOLLOW CONTROLLER - ƯU TIÊN ĐIỂM HỒNG LOOK-AHEAD
     // ---------------------------------------------------
-    BASE_SPEED: 92,
+    BASE_SPEED: 96,
 
     // Thang tốc độ LOGIC nội bộ. Với hộp số 1/120 không cần đẩy quá cao;
     // vẫn giữ đủ khoảng điều khiển để tạo chênh lệch trái/phải mượt.
@@ -132,17 +136,17 @@ window.APP_CONFIG = {
     // MOTOR_MIN_RUN_PWM: PWM nhỏ nhất dùng khi bánh cần quay.
     // MOTOR_CRUISE_PWM : PWM chạy thẳng mặc định.
     // START_BOOST đang tắt (0 ms); chỉ bật lại nếu thực tế vẫn khó đề-pa.
-    MOTOR_MIN_RUN_PWM: 50,
-    MOTOR_CRUISE_PWM: 92,
+    MOTOR_MIN_RUN_PWM: 62,
+    MOTOR_CRUISE_PWM: 98,
     MOTOR_START_BOOST_PWM: 112,
     MOTOR_START_BOOST_MS: 0,
-    MOTOR_MAX_PWM: 155,
+    MOTOR_MAX_PWM: 165,
 
 
     // Giá trị logic cực nhỏ được coi là STOP.
     MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
 
-    MIN_CURVE_SPEED: 40,
+    MIN_CURVE_SPEED: 44,
 
     // pathAngle là góc vector:
     //   center xanh gần xe -> điểm hồng look-ahead
@@ -181,7 +185,7 @@ window.APP_CONFIG = {
     PATH_FULL_SLOWDOWN_DEG: 15,
 
     // Không cho correction lái vượt quá mức này (PWM).
-    MAX_STEERING_CORRECTION: 60,
+    MAX_STEERING_CORRECTION: 58,
 
     // Lệch tâm tới tỷ lệ này của bề rộng frame thì giảm tốc mạnh.
     CENTER_FULL_SLOWDOWN_RATIO: 0.20,
@@ -195,17 +199,17 @@ window.APP_CONFIG = {
     LOST_PREDICT_STEERING_GAIN: 0.82,
 
     // Không cho PWM nhảy quá nhiều giữa hai lần publish MQTT.
-    MOTOR_MAX_DELTA_PER_UPDATE: 8,
+    MOTOR_MAX_DELTA_PER_UPDATE: 7,
 
     // Khi bám line bình thường không đảo chiều bánh trong cua. Hộp số 1/120
     // đủ mô-men để cua bằng cách giảm bánh trong thay vì reverse.
-    LINE_FOLLOW_MIN_LOGICAL_SPEED: 4,
+    LINE_FOLLOW_MIN_LOGICAL_SPEED: 6,
 
-    // Nếu controller muốn bánh trong chạy rất chậm trong LINE_FOLLOW,
-    // cho bánh đó coast/STOP thay vì ép lên MOTOR_MIN_RUN_PWM.
-    // Chỉ kích hoạt khi bánh ngoài nhanh hơn đủ nhiều để tránh dừng cả hai bánh.
-    INNER_WHEEL_COAST_LOGICAL: 16,
-    INNER_WHEEL_COAST_MIN_GAP_LOGICAL: 24,
+    // Chỉ là ngưỡng mô-men vật lý cho LINE_FOLLOW.
+    // KHÔNG thay đổi PID / baseSpeed / correction của precision-v2.
+    // Nếu một bánh đang tiến nhưng PWM sau mapping thấp hơn mức này,
+    // nâng bánh đó lên floor và nâng bánh còn lại cùng lượng để giữ chênh steering.
+    LINE_FOLLOW_TORQUE_FLOOR_PWM: 70,
 
     // Cảm biến IR của bạn là active-low:
     // true  = nền đường / có tín hiệu

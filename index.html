@@ -246,6 +246,8 @@
           <div><span>Motor phải gửi MQTT</span><b id="visionMotorRightState">0</b></div>
           <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
           <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
+          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Gear120 Precision V2 · Torque70</b></div>
+          <div><span>Config / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
 
@@ -398,6 +400,14 @@
           <div>
             <span>Publish MQTT motor</span>
             <b id="motorPublishState">-</b>
+          </div>
+          <div>
+            <span>Source build</span>
+            <b id="sourceBuildState">2026-09-27 · Gear120 Precision V2 · Torque70</b>
+          </div>
+          <div>
+            <span>Config / Navigation</span>
+            <b id="moduleBuildState">-</b>
           </div>
         </div>
 
@@ -611,7 +621,7 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20260917-kick180-v3"></script>
+<script src="config.js?v=20260927-gear120-v2-torque70-ui1"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -622,9 +632,34 @@
 <script src="mqtt-robot.js"></script>
 <script src="orientation.js"></script>
 <script src="vision.js"></script>
-<script src="navigation.js?v=20260917-kick180-v3"></script>
+<script src="navigation.js?v=20260927-gear120-v2-torque70-ui1"></script>
 <script src="app.js"></script>
 <script src="robot-control.js?v=20260917-kick180-v3"></script>
+<script>
+(() => {
+  const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
+    || window.ROBOT_SOURCE_BUILD
+    || window.ROBOT_NAV_BUILD
+    || "unknown";
+
+  const configBuild = window.ROBOT_CONFIG_BUILD || "unknown";
+  const navBuild = window.ROBOT_NAV_BUILD || "unknown";
+  const moduleBuild = `CFG: ${configBuild} · NAV: ${navBuild}`;
+
+  const setText = (id, value) => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.textContent = value;
+      element.title = value;
+    }
+  };
+
+  setText("sourceBuildState", sourceBuild);
+  setText("visionSourceBuildState", sourceBuild);
+  setText("moduleBuildState", moduleBuild);
+  setText("visionModuleBuildState", moduleBuild);
+})();
+</script>
 
 </body>
 </html>
