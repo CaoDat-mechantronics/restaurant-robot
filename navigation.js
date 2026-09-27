@@ -108,7 +108,7 @@
       if (!this.controlTimer) {
         this.controlTimer = window.setInterval(
           () => this.controlLoop(),
-          Math.max(30, Number(this.config.MOTOR_INTERVAL_MS) || 70)
+          Math.max(30, Number(this.config.MOTOR_INTERVAL_MS) || 40)
         );
       }
     }
@@ -511,8 +511,8 @@
         this.resetLineController();
         this.setMotorReason("IR_LEFT", "Chạm biên trái → ép xe sang phải");
         this.sendMotor(
-          Number(this.config.BORDER_FAST_SPEED) || 145,
-          Number(this.config.BORDER_SLOW_SPEED) || 65,
+          Number(this.config.BORDER_FAST_SPEED) || 88,
+          Number(this.config.BORDER_SLOW_SPEED) || 30,
           true
         );
         return;
@@ -522,8 +522,8 @@
         this.resetLineController();
         this.setMotorReason("IR_RIGHT", "Chạm biên phải → ép xe sang trái");
         this.sendMotor(
-          Number(this.config.BORDER_SLOW_SPEED) || 65,
-          Number(this.config.BORDER_FAST_SPEED) || 145,
+          Number(this.config.BORDER_SLOW_SPEED) || 30,
+          Number(this.config.BORDER_FAST_SPEED) || 88,
           true
         );
         return;
@@ -632,16 +632,16 @@
       // ===================================================
       // 4) Tốc độ cơ sở: cua gấp -> giảm tốc
       // ===================================================
-      const configuredBase = Number(this.config.BASE_SPEED) || 122;
+      const configuredBase = Number(this.config.BASE_SPEED) || 96;
       const minCurveSpeed = Math.min(
         configuredBase,
-        Number(this.config.MIN_CURVE_SPEED) || 68
+        Number(this.config.MIN_CURVE_SPEED) || 44
       );
-      const maxSpeed = Number(this.config.MAX_SPEED) || 190;
+      const maxSpeed = Number(this.config.MAX_SPEED) || 155;
 
       const fullSlowdownDeg = Math.max(
         8,
-        Number(this.config.PATH_FULL_SLOWDOWN_DEG) || 24
+        Number(this.config.PATH_FULL_SLOWDOWN_DEG) || 15
       );
 
       // Dùng góc tới điểm hồng làm tín hiệu cua chính.
@@ -701,7 +701,7 @@
       if (oneLineMode) {
         baseSpeed = Math.min(
           baseSpeed,
-          Math.max(35, Number(this.config.ONE_LINE_BASE_SPEED) || 76)
+          Math.max(35, Number(this.config.ONE_LINE_BASE_SPEED) || 50)
         );
       }
 
@@ -709,7 +709,7 @@
       if (predictedMode) {
         baseSpeed = Math.min(
           baseSpeed,
-          Math.max(25, Number(this.config.LOST_PREDICT_SPEED) || 52)
+          Math.max(25, Number(this.config.LOST_PREDICT_SPEED) || 34)
         );
       }
 
@@ -719,7 +719,7 @@
       const now = performance.now();
       let dt = this.prevControlAt > 0
         ? (now - this.prevControlAt) / 1000
-        : (Number(this.config.MOTOR_INTERVAL_MS) || 70) / 1000;
+        : (Number(this.config.MOTOR_INTERVAL_MS) || 40) / 1000;
       dt = this.clamp(dt, 0.02, 0.20);
 
       let rawPositionDerivative = 0;
@@ -762,11 +762,11 @@
       // ===================================================
       // Thành phần chính: pathAngle từ điểm xanh gần xe -> điểm hồng.
       // Thành phần phụ: positionError giữ robot gần giữa lane.
-      const angleKp = Number(this.config.PATH_ANGLE_KP) || 3.0;
-      const angleKd = Number(this.config.PATH_ANGLE_KD) || 0.055;
-      const positionKp = Number(this.config.POSITION_KP) || 0.10;
-      const positionKd = Number(this.config.POSITION_KD) || 0.004;
-      const curvatureKp = Number(this.config.CURVATURE_KP) || 0.18;
+      const angleKp = Number(this.config.PATH_ANGLE_KP) || 2.15;
+      const angleKd = Number(this.config.PATH_ANGLE_KD) || 0.030;
+      const positionKp = Number(this.config.POSITION_KP) || 0.075;
+      const positionKd = Number(this.config.POSITION_KD) || 0.0025;
+      const curvatureKp = Number(this.config.CURVATURE_KP) || 0.09;
 
       const angleTerm = angleKp * pathAngle;
       const angleDTerm = angleKd * this.filteredPathAngleDerivative;
@@ -833,12 +833,35 @@
 
       const maxCorrection = Math.max(
         10,
-        Number(this.config.MAX_STEERING_CORRECTION) || 92
+        Number(this.config.MAX_STEERING_CORRECTION) || 58
       );
+
+      // Với hộp số 1/120, khi baseSpeed đã giảm ở cua thì steering cũng
+      // phải giảm theo. Không cho correction lớn hơn phần tốc độ còn lại
+      // của bánh trong, tránh trạng thái một bánh bị ép xuống minimum còn
+      // bánh ngoài vọt lên cao gây giật lái / quay quá góc.
+      const configuredMinForwardForLimit = Number(
+        this.config.LINE_FOLLOW_MIN_LOGICAL_SPEED
+      );
+      const minForwardForLimit = Math.max(
+        0,
+        Number.isFinite(configuredMinForwardForLimit)
+          ? configuredMinForwardForLimit
+          : 6
+      );
+      const speedAwareMaxCorrection = Math.max(
+        10,
+        baseSpeed - minForwardForLimit
+      );
+      const effectiveMaxCorrection = Math.min(
+        maxCorrection,
+        speedAwareMaxCorrection
+      );
+
       correction = this.clamp(
         correction,
-        -maxCorrection,
-        maxCorrection
+        -effectiveMaxCorrection,
+        effectiveMaxCorrection
       );
 
       // ===================================================
@@ -846,14 +869,26 @@
       // ===================================================
       // correction < 0 -> Left chậm, Right nhanh -> cua trái
       // correction > 0 -> Left nhanh, Right chậm -> cua phải
+      // Hộp số 1/120 đã đủ mô-men: khi bám line chỉ cần giảm bánh trong,
+      // không reverse bánh trong vì reverse dễ làm xe giật và quá lái.
+      const configuredMinForward = Number(
+        this.config.LINE_FOLLOW_MIN_LOGICAL_SPEED
+      );
+      const minForwardLogical = Math.max(
+        0,
+        Number.isFinite(configuredMinForward)
+          ? configuredMinForward
+          : 6
+      );
+
       const leftTarget = this.clamp(
         baseSpeed + correction,
-        -maxSpeed,
+        minForwardLogical,
         maxSpeed
       );
       const rightTarget = this.clamp(
         baseSpeed - correction,
-        -maxSpeed,
+        minForwardLogical,
         maxSpeed
       );
 
@@ -958,17 +993,17 @@
       let speed;
 
       if (remaining > 35) {
-        speed = Number(this.config.TURN_FAST_SPEED) || 145;
+        speed = Number(this.config.TURN_FAST_SPEED) || 88;
       }
       else if (remaining > 15) {
-        speed = Number(this.config.TURN_MEDIUM_SPEED) || 105;
+        speed = Number(this.config.TURN_MEDIUM_SPEED) || 68;
       }
       else {
-        speed = Number(this.config.TURN_SLOW_SPEED) || 72;
+        speed = Number(this.config.TURN_SLOW_SPEED) || 48;
       }
 
       if (angle >= target) {
-        speed = Number(this.config.TURN_SLOW_SPEED) || 72;
+        speed = Number(this.config.TURN_SLOW_SPEED) || 48;
       }
 
       if (this.turnDirection === "LEFT") {
@@ -1005,11 +1040,11 @@
 
       const base = Math.min(
         88,
-        Number(this.config.BASE_SPEED) || 122
+        Number(this.config.BASE_SPEED) || 96
       );
 
-      const positionKp = Number(this.config.POSITION_KP) || 0.10;
-      const angleKp = Number(this.config.PATH_ANGLE_KP) || 3.0;
+      const positionKp = Number(this.config.POSITION_KP) || 0.075;
+      const angleKp = Number(this.config.PATH_ANGLE_KP) || 2.15;
 
       // Sau cú rẽ, vẫn ưu tiên hướng tới điểm hồng nhưng giới hạn nhẹ hơn
       // để quá trình bắt lại line không giật mạnh.
@@ -1064,18 +1099,18 @@
     // 2) Tầng vật lý chuyển sang PWM theo cơ chế:
     //
     //    STOP        : 0 / 0
-    //    vừa khởi động: tối thiểu 220 trong ~500 ms
-    //    chạy ổn định : nền 180, bánh ngoài cua tăng dần tới 255
+    //    chạy thẳng : quanh MOTOR_CRUISE_PWM
+    //    vào cua     : bánh trong giảm thật, bánh ngoài tăng vừa phải
+    //    kick-start  : mặc định tắt với hộp số 1/120
     //
-    // Nhờ vậy xe có lực để bắt đầu chạy nhưng sau đó đủ chậm để camera
-    // tiếp tục nhận diện đường và điều chỉnh liên tục.
+    // Nhờ vậy tốc độ vật lý phản ánh đúng curve slowdown của controller.
     // =====================================================
 
     sendMotor(left, right, force = false) {
       const now = performance.now();
       const interval = Math.max(
         30,
-        Number(this.config.MOTOR_INTERVAL_MS) || 70
+        Number(this.config.MOTOR_INTERVAL_MS) || 40
       );
 
       if (!force && now - this.lastMotorAt < interval * 0.8) {
@@ -1120,14 +1155,14 @@
       }
 
       // ---------------------------------------------------
-      // Slew-rate chạy trên thang LOGIC.
-      // Trong pha kick-start vẫn cho logical controller tiến dần tới
-      // target; khi hết 500 ms xe không bị giật sang một trạng thái cũ.
+      // Slew-rate chạy trên thang LOGIC để hạn chế thay đổi PWM đột ngột.
+      // Nếu sau này bật kick-start trở lại thì controller vẫn tiếp tục
+      // tiến dần tới target trong suốt pha boost.
       // ---------------------------------------------------
       if (!force) {
         const maxDelta = Math.max(
           1,
-          Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 20
+          Number(this.config.MOTOR_MAX_DELTA_PER_UPDATE) || 7
         );
 
         const deltaLeft = nextLeft - this.lastLogicalMotor.left;
@@ -1146,7 +1181,7 @@
 
       const maxSpeed = Math.max(
         1,
-        Number(this.config.MAX_SPEED) || 190
+        Number(this.config.MAX_SPEED) || 155
       );
 
       nextLeft = this.clamp(nextLeft, -maxSpeed, maxSpeed);
@@ -1161,9 +1196,10 @@
       // Bắt đầu kick-start chỉ khi chuyển từ STOP -> RUN.
       // ---------------------------------------------------
       if (this.motorNeedsStartBoost) {
+        const configuredBoostMs = Number(this.config.MOTOR_START_BOOST_MS);
         const boostMs = Math.max(
           0,
-          Number(this.config.MOTOR_START_BOOST_MS) || 500
+          Number.isFinite(configuredBoostMs) ? configuredBoostMs : 0
         );
 
         this.motorStartBoostUntil = now + boostMs;
@@ -1203,7 +1239,7 @@
 
         this.setMotorReason(
           "KICK_START",
-          `PWM>=${Number(this.config.MOTOR_START_BOOST_PWM) || 220} · còn ${remain} ms`
+          `PWM>=${Number(this.config.MOTOR_START_BOOST_PWM) || 112} · còn ${remain} ms`
         );
       }
 
@@ -1215,20 +1251,18 @@
     }
 
     // =====================================================
-    // MAP CẶP LOGICAL MOTOR -> PWM VẬT LÝ
+    // MAP LOGICAL MOTOR -> PWM VẬT LÝ (GEAR 1/120)
     // =====================================================
     //
-    // Chạy bình thường cùng chiều:
-    //   thẳng       -> khoảng 180 / 180
-    //   cua trái    -> 180 / (180..235)
-    //   cua phải    -> (180..235) / 180
+    // Khác bản cũ: không ép cả hai bánh luôn >= MOTOR_CRUISE_PWM.
+    // Mỗi bánh được map độc lập theo magnitude logic:
     //
-    // Trong kick-start:
-    //   nền được nâng lên ít nhất 220 nhưng vẫn GIỮ chênh lệch lái.
-    //   Ví dụ cua trái ngay lúc bắt đầu có thể là 220 / 235,
-    //   không ép thành 220 / 220.
+    //   logical nhỏ          -> MOTOR_MIN_RUN_PWM
+    //   logical = BASE_SPEED -> MOTOR_CRUISE_PWM
+    //   logical = MAX_SPEED  -> MOTOR_MAX_PWM
     //
-    // Quay tại chỗ (hai dấu ngược nhau) vẫn giữ dấu để gyro turn hoạt động.
+    // Vì vậy khi cua, bánh trong thực sự giảm tốc và curve slowdown thực sự
+    // làm cả xe chậm lại. Đây phù hợp hơn khi hộp số 1/120 đã đủ mô-men.
     // =====================================================
 
     mapMotorPairToPwm(left, right, boostActive = false) {
@@ -1244,154 +1278,91 @@
         return { left: 0, right: 0 };
       }
 
-      const cruisePwm = this.clamp(
-        Number(this.config.MOTOR_CRUISE_PWM) || 180,
+      const minRunPwm = this.clamp(
+        Number(this.config.MOTOR_MIN_RUN_PWM) || 62,
         1,
         254
       );
 
-      const boostPwm = this.clamp(
-        Number(this.config.MOTOR_START_BOOST_PWM) || 220,
+      const cruisePwm = this.clamp(
+        Number(this.config.MOTOR_CRUISE_PWM) || 98,
+        minRunPwm,
+        254
+      );
+
+      const maxPwm = this.clamp(
+        Number(this.config.MOTOR_MAX_PWM) || 165,
         cruisePwm,
         255
       );
 
-      const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 255,
-        boostPwm,
-        255
+      const boostPwm = this.clamp(
+        Number(this.config.MOTOR_START_BOOST_PWM) || cruisePwm,
+        cruisePwm,
+        maxPwm
       );
 
-      const baseFloor = boostActive ? boostPwm : cruisePwm;
+      let leftPwm = this.mapSingleMotorPhysical(
+        leftValue,
+        minRunPwm,
+        cruisePwm,
+        maxPwm
+      );
+      let rightPwm = this.mapSingleMotorPhysical(
+        rightValue,
+        minRunPwm,
+        cruisePwm,
+        maxPwm
+      );
 
-      // ---------------------------------------------------
-      // Nếu một bên là 0 hoặc hai bên ngược dấu: đây là stop-one-side,
-      // reverse hoặc pivot turn. Map từng bánh nhưng vẫn bảo đảm kick-start
-      // khi vừa rời trạng thái dừng.
-      // ---------------------------------------------------
-      if (
-        leftValue === 0 ||
-        rightValue === 0 ||
-        Math.sign(leftValue) !== Math.sign(rightValue)
-      ) {
-        return {
-          left: this.mapSingleMotorPhysical(leftValue, baseFloor, maxPwm),
-          right: this.mapSingleMotorPhysical(rightValue, baseFloor, maxPwm)
-        };
+      // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá chênh lệch
+      // trái/phải. Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
+      if (boostActive) {
+        if (leftPwm !== 0) {
+          leftPwm = Math.sign(leftPwm) * Math.max(Math.abs(leftPwm), boostPwm);
+        }
+        if (rightPwm !== 0) {
+          rightPwm = Math.sign(rightPwm) * Math.max(Math.abs(rightPwm), boostPwm);
+        }
       }
 
-      // ---------------------------------------------------
-      // Hai bên cùng chiều: ưu tiên tốc độ nền thấp để camera theo kịp,
-      // và biểu diễn steering chủ yếu bằng cách TĂNG bánh ngoài cua.
-      // ---------------------------------------------------
-      const logicalMax = Math.max(
-        1,
-        Number(this.config.MAX_SPEED) || 190
-      );
+      return { left: leftPwm, right: rightPwm };
+    }
+
+    mapSingleMotorPhysical(value, minRunPwm, cruisePwm, maxPwm) {
+      const numeric = Number(value) || 0;
+      if (numeric === 0) return 0;
+
+      const sign = numeric < 0 ? -1 : 1;
+      const magnitude = Math.abs(numeric);
 
       const logicalBase = Math.max(
         1,
-        Number(this.config.BASE_SPEED) || 122
+        Number(this.config.BASE_SPEED) || 96
       );
-
-      const maxSteeringCorrection = Math.max(
-        1,
-        Number(this.config.MAX_STEERING_CORRECTION) || 92
-      );
-
-      const maxSteeringDeltaPwm = Math.max(
-        0,
-        Number(this.config.MOTOR_STEERING_MAX_DELTA_PWM) || 55
-      );
-
-      const cruiseExtraMax = Math.max(
-        0,
-        Number(this.config.MOTOR_CRUISE_EXTRA_MAX_PWM) || 10
-      );
-
-      const sign = Math.sign(leftValue);
-      const leftAbs = Math.abs(leftValue);
-      const rightAbs = Math.abs(rightValue);
-      const averageLogical = (leftAbs + rightAbs) / 2;
-
-      // Chạy thẳng thông thường vẫn ở 180.
-      // Chỉ khi logical controller thật sự đòi > BASE_SPEED mới tăng nhẹ
-      // cả hai bánh, tối đa thêm MOTOR_CRUISE_EXTRA_MAX_PWM.
-      const extraRatio = this.clamp(
-        (averageLogical - logicalBase) /
-          Math.max(1, logicalMax - logicalBase),
-        0,
-        1
-      );
-
-      let physicalBase = baseFloor;
-
-      if (!boostActive) {
-        physicalBase = this.clamp(
-          cruisePwm + extraRatio * cruiseExtraMax,
-          cruisePwm,
-          maxPwm
-        );
-      }
-
-      // halfDifference mang dấu:
-      // > 0 => bánh trái logic nhanh hơn => cua phải.
-      // < 0 => bánh phải logic nhanh hơn => cua trái.
-      const halfDifference = (leftAbs - rightAbs) / 2;
-      const steerRatio = this.clamp(
-        Math.abs(halfDifference) / maxSteeringCorrection,
-        0,
-        1
-      );
-
-      const steeringDelta = steerRatio * maxSteeringDeltaPwm;
-
-      let leftPwm = physicalBase;
-      let rightPwm = physicalBase;
-
-      if (halfDifference > 0) {
-        // Cua phải: bánh trái nhanh hơn.
-        leftPwm += steeringDelta;
-      }
-      else if (halfDifference < 0) {
-        // Cua trái: bánh phải nhanh hơn.
-        rightPwm += steeringDelta;
-      }
-
-      leftPwm = this.clamp(Math.round(leftPwm), baseFloor, maxPwm);
-      rightPwm = this.clamp(Math.round(rightPwm), baseFloor, maxPwm);
-
-      return {
-        left: sign * leftPwm,
-        right: sign * rightPwm
-      };
-    }
-
-    mapSingleMotorPhysical(value, floorPwm, maxPwm) {
-      const numeric = Number(value) || 0;
-
-      if (numeric === 0) {
-        return 0;
-      }
-
       const logicalMax = Math.max(
-        1,
-        Number(this.config.MAX_SPEED) || 190
+        logicalBase + 1,
+        Number(this.config.MAX_SPEED) || 155
       );
 
-      const sign = numeric < 0 ? -1 : 1;
-      const normalized = this.clamp(
-        Math.abs(numeric) / logicalMax,
-        0,
-        1
-      );
+      let pwm;
 
-      // Ở pivot/reverse, dùng toàn dải floor..255 để vẫn đủ mô-men quay.
-      const pwm = floorPwm + normalized * (maxPwm - floorPwm);
+      if (magnitude <= logicalBase) {
+        // 0..BASE_SPEED -> MIN_RUN..CRUISE
+        const ratio = this.clamp(magnitude / logicalBase, 0, 1);
+        pwm = minRunPwm + ratio * (cruisePwm - minRunPwm);
+      }
+      else {
+        // BASE_SPEED..MAX_SPEED -> CRUISE..MAX
+        const ratio = this.clamp(
+          (magnitude - logicalBase) / (logicalMax - logicalBase),
+          0,
+          1
+        );
+        pwm = cruisePwm + ratio * (maxPwm - cruisePwm);
+      }
 
-      return sign * Math.round(
-        this.clamp(pwm, floorPwm, maxPwm)
-      );
+      return sign * Math.round(this.clamp(pwm, minRunPwm, maxPwm));
     }
 
     updateMotorDebugUi(left, right) {
@@ -1415,7 +1386,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-17-kick180-v3";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-precision-v2";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

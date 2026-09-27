@@ -115,108 +115,105 @@ window.APP_CONFIG = {
     // ---------------------------------------------------
     // PATH FOLLOW CONTROLLER - ƯU TIÊN ĐIỂM HỒNG LOOK-AHEAD
     // ---------------------------------------------------
-    BASE_SPEED: 122,
+    BASE_SPEED: 96,
 
-    // Thang tốc độ LOGIC mà thuật toán path-follow sử dụng nội bộ.
-    // Giữ 190 để vẫn còn đủ độ phân giải khi tính chênh lệch trái/phải.
-    MAX_SPEED: 190,
+    // Thang tốc độ LOGIC nội bộ. Với hộp số 1/120 không cần đẩy quá cao;
+    // vẫn giữ đủ khoảng điều khiển để tạo chênh lệch trái/phải mượt.
+    MAX_SPEED: 155,
 
     // ===================================================
     // MOTOR OUTPUT VẬT LÝ - KICK START + CRUISE
     // ===================================================
     //
-    // Xe nặng cần mô-men lớn để bắt đầu chuyển động, nhưng nếu luôn chạy
-    // 200..255 thì camera không kịp bám line. Vì vậy tầng output dùng 2 pha:
+    // Hộp số 1/120 đã tăng mô-men, vì vậy không còn ép PWM nền cao.
+    // PWM vật lý được map theo từng bánh: bánh trong cua có thể giảm thật,
+    // bánh ngoài tăng vừa phải. Nhờ vậy curve slowdown của controller có tác dụng.
     //
-    // 1) Sau MỖI lần STOP -> kick-start trong 500 ms với PWM tối thiểu 220.
-    // 2) Hết kick-start -> về PWM nền 180 và chỉ tăng bánh ngoài theo
-    //    correction của thuật toán path-follow.
-    //
-    // STOP luôn là đúng 0.
-    MOTOR_CRUISE_PWM: 80,
-    MOTOR_START_BOOST_PWM: 190,
-    MOTOR_START_BOOST_MS: 30,
-    MOTOR_MAX_PWM: 255,
+    // MOTOR_MIN_RUN_PWM: PWM nhỏ nhất dùng khi bánh cần quay.
+    // MOTOR_CRUISE_PWM : PWM chạy thẳng mặc định.
+    // START_BOOST đang tắt (0 ms); chỉ bật lại nếu thực tế vẫn khó đề-pa.
+    MOTOR_MIN_RUN_PWM: 62,
+    MOTOR_CRUISE_PWM: 98,
+    MOTOR_START_BOOST_PWM: 112,
+    MOTOR_START_BOOST_MS: 0,
+    MOTOR_MAX_PWM: 165,
 
-    // Mức tăng tối đa của bánh nhanh hơn khi bám cua.
-    // Ví dụ cua trái gấp: Left ~= 180, Right có thể tăng dần tới 235.
-    MOTOR_STEERING_MAX_DELTA_PWM: 55,
-
-    // Nếu thuật toán logic yêu cầu tốc độ trung bình cao hơn BASE_SPEED,
-    // cho phép tăng nhẹ cả hai bánh. Bình thường chạy thẳng vẫn quanh 180.
-    MOTOR_CRUISE_EXTRA_MAX_PWM: 10,
 
     // Giá trị logic cực nhỏ được coi là STOP.
     MOTOR_ZERO_CUTOFF_LOGICAL: 0.5,
 
-    MIN_CURVE_SPEED: 68,
+    MIN_CURVE_SPEED: 44,
 
     // pathAngle là góc vector:
     //   center xanh gần xe -> điểm hồng look-ahead
     // pathAngle < 0: đường phía trước cong trái
     // pathAngle > 0: đường phía trước cong phải
     // Đây là tín hiệu lái CHÍNH.
-    PATH_ANGLE_KP: 3.0,
-    PATH_ANGLE_KD: 0.055,
+    PATH_ANGLE_KP: 2.15,
+    PATH_ANGLE_KD: 0.030,
 
     // positionError = center xanh gần xe - tâm camera.
     // Chỉ dùng để kéo xe về giữa lane, không được lấn át hướng cua rõ ràng.
-    POSITION_KP: 0.10,
-    POSITION_KD: 0.004,
+    POSITION_KP: 0.075,
+    POSITION_KD: 0.0025,
 
     // Feed-forward nhỏ theo độ cong của center curve.
-    CURVATURE_KP: 0.18,
+    CURVATURE_KP: 0.09,
 
     // Deadband chống rung khi gần thẳng / gần tâm.
     PATH_ANGLE_DEADBAND_DEG: 1.2,
     POSITION_DEADBAND_PX: 4,
 
     // Lọc đạo hàm để motor không giật vì noise camera.
-    PATH_ANGLE_DERIVATIVE_EMA_ALPHA: 0.18,
-    POSITION_DERIVATIVE_EMA_ALPHA: 0.20,
+    PATH_ANGLE_DERIVATIVE_EMA_ALPHA: 0.16,
+    POSITION_DERIVATIVE_EMA_ALPHA: 0.18,
 
     // Nếu đường cong rõ ràng, khóa dấu correction theo hướng điểm hồng.
     // Ví dụ pathAngle < -5° => correction phải âm => bánh phải nhanh hơn.
     CURVE_DIRECTION_LOCK_DEG: 5,
-    CURVE_DIRECTION_MIN_CORRECTION: 10,
+    CURVE_DIRECTION_MIN_CORRECTION: 7,
 
     // Nếu xe lệch tâm cực lớn thì cho phép position controller override
     // curve-direction lock để tránh lao khỏi lane.
     CURVE_DIRECTION_OVERRIDE_OFFCENTER_RATIO: 0.85,
 
     // Góc tới điểm hồng đạt mức này thì giảm về MIN_CURVE_SPEED.
-    PATH_FULL_SLOWDOWN_DEG: 24,
+    PATH_FULL_SLOWDOWN_DEG: 15,
 
     // Không cho correction lái vượt quá mức này (PWM).
-    MAX_STEERING_CORRECTION: 92,
+    MAX_STEERING_CORRECTION: 58,
 
     // Lệch tâm tới tỷ lệ này của bề rộng frame thì giảm tốc mạnh.
-    CENTER_FULL_SLOWDOWN_RATIO: 0.26,
+    CENTER_FULL_SLOWDOWN_RATIO: 0.20,
 
     // Khi chỉ còn 1 vạch: center xanh được suy ra từ vạch thật + laneWidthModel.
-    ONE_LINE_BASE_SPEED: 76,
+    ONE_LINE_BASE_SPEED: 50,
     ONE_LINE_STEERING_GAIN: 1.08,
 
     // Khi mất cả hai vạch nhưng vẫn còn prediction vài frame.
-    LOST_PREDICT_SPEED: 52,
+    LOST_PREDICT_SPEED: 34,
     LOST_PREDICT_STEERING_GAIN: 0.82,
 
     // Không cho PWM nhảy quá nhiều giữa hai lần publish MQTT.
-    MOTOR_MAX_DELTA_PER_UPDATE: 20,
+    MOTOR_MAX_DELTA_PER_UPDATE: 7,
+
+    // Khi bám line bình thường không đảo chiều bánh trong cua. Hộp số 1/120
+    // đủ mô-men để cua bằng cách giảm bánh trong thay vì reverse.
+    LINE_FOLLOW_MIN_LOGICAL_SPEED: 6,
 
     // Cảm biến IR của bạn là active-low:
     // true  = nền đường / có tín hiệu
     // false = băng đen / mất tín hiệu
     IR_ACTIVE_LOW: true,
-    BORDER_FAST_SPEED: 145,
-    BORDER_SLOW_SPEED: 65,
+    BORDER_FAST_SPEED: 88,
+    BORDER_SLOW_SPEED: 30,
 
     // ---------------------------------------------------
     // RẼ Ở NGÃ 3 BẰNG GYRO + REACQUIRE LINE
     // ---------------------------------------------------
-    TURN_FAST_SPEED: 145,
-    TURN_MEDIUM_SPEED: 105,
-    TURN_SLOW_SPEED: 72,
+    TURN_FAST_SPEED: 88,
+    TURN_MEDIUM_SPEED: 68,
+    TURN_SLOW_SPEED: 48,
     TURN_START_LINE_SEARCH_DEG: 88,
     TURN_TARGET_DEG: 90,
     TURN_TARGET_TOLERANCE_DEG: 2,
@@ -250,6 +247,6 @@ window.APP_CONFIG = {
     LINE_LOST_STOP_MS: 650,
 
     // Tần số gửi lệnh motor lên HiveMQ.
-    MOTOR_INTERVAL_MS: 70
+    MOTOR_INTERVAL_MS: 40
   }
 };
