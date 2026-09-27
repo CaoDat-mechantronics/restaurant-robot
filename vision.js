@@ -1584,6 +1584,49 @@
         curvatureDeg = headingFar - headingNear;
       }
 
+      // =====================================================
+      // BLUE CURVE SEVERITY
+      // =====================================================
+      // Chỉ dùng hình học của centerCurve màu xanh dương.
+      // Không tạo trajectory phụ. 0 = thẳng, 1 = cua rất gắt.
+      const blueHeadingFull = Math.max(1, Number(this.config.BLUE_CURVE_HEADING_FULL_DEG) || 13);
+      const blueBendFull = Math.max(1, Number(this.config.BLUE_CURVE_BEND_FULL_DEG) || 8);
+      const blueLateralFullRatio = Math.max(0.02, Number(this.config.BLUE_CURVE_LATERAL_FULL_RATIO) || 0.11);
+
+      const blueHeadingSeverity = Number.isFinite(headingErrorDeg)
+        ? this.clamp(Math.abs(headingErrorDeg) / blueHeadingFull, 0, 1)
+        : 0;
+      const blueBendSeverity = Number.isFinite(curvatureDeg)
+        ? this.clamp(Math.abs(curvatureDeg) / blueBendFull, 0, 1)
+        : 0;
+      const blueLateralSeverity =
+        Number.isFinite(laneCenter) && Number.isFinite(lookAheadCenter)
+          ? this.clamp(
+              Math.abs(lookAheadCenter - laneCenter) /
+                Math.max(1, width * blueLateralFullRatio),
+              0,
+              1
+            )
+          : 0;
+
+      // Heading/lookahead quyết định chính; bend bổ sung cho cua đổi hướng nhanh.
+      const blueCurveSeverity = this.clamp(
+        Math.max(
+          blueHeadingSeverity,
+          blueLateralSeverity,
+          blueBendSeverity * 0.90
+        ),
+        0,
+        1
+      );
+
+      const blueCurveDirection =
+        Number.isFinite(headingErrorDeg) && Math.abs(headingErrorDeg) >= 0.5
+          ? (headingErrorDeg < 0 ? "LEFT" : "RIGHT")
+          : Number.isFinite(lookAheadCenter) && Number.isFinite(laneCenter)
+            ? (lookAheadCenter < laneCenter ? "LEFT" : lookAheadCenter > laneCenter ? "RIGHT" : "STRAIGHT")
+            : "STRAIGHT";
+
       const minConfidence = this.clamp(
         Number(this.config.VISION_MIN_CONFIDENCE) || 0.38,
         0.05,
@@ -1731,6 +1774,8 @@
         lineError,
         headingErrorDeg,
         curvatureDeg,
+        blueCurveSeverity,
+        blueCurveDirection,
         laneWidth: Number.isFinite(laneWidthNear) ? laneWidthNear : null,
 
         nearT,
@@ -1858,7 +1903,7 @@
         lane,
         lane.predictedFromHistory
           ? "#a48afb"
-          : (lane.leftInferred ? "#fdb022" : "#32d583"),
+          : (lane.leftInferred ? "#98a2b3" : "#32d583"),
         lane.leftInferred || lane.predictedFromHistory,
         3
       );
@@ -1869,7 +1914,7 @@
         lane,
         lane.predictedFromHistory
           ? "#a48afb"
-          : (lane.rightInferred ? "#fdb022" : "#32d583"),
+          : (lane.rightInferred ? "#98a2b3" : "#32d583"),
         lane.rightInferred || lane.predictedFromHistory,
         3
       );
@@ -1883,14 +1928,6 @@
         3
       );
 
-      // Tâm camera.
-      ctx.strokeStyle = "#fdb022";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(lane.frameCenter, lane.roiTop);
-      ctx.lineTo(lane.frameCenter, lane.roiBottom);
-      ctx.stroke();
-
       // Điểm near + lookahead dùng thật cho controller.
       if (Number.isFinite(lane.laneCenter)) {
         ctx.fillStyle = "#53b1fd";
@@ -1900,7 +1937,9 @@
       }
 
       if (Number.isFinite(lane.lookAheadCenter)) {
-        ctx.fillStyle = "#ee46bc";
+        // Look-ahead chỉ là điểm sample trên cùng quỹ đạo xanh,
+        // không vẽ thêm một đường điều khiển màu khác.
+        ctx.fillStyle = "#53b1fd";
         ctx.beginPath();
         ctx.arc(
           lane.lookAheadCenter,
@@ -1910,15 +1949,6 @@
           Math.PI * 2
         );
         ctx.fill();
-
-        if (Number.isFinite(lane.laneCenter)) {
-          ctx.strokeStyle = "#ee46bc";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(lane.laneCenter, lane.nearY);
-          ctx.lineTo(lane.lookAheadCenter, lane.lookAheadY);
-          ctx.stroke();
-        }
       }
 
       // QR gần nhất.
@@ -1952,7 +1982,7 @@
         `Otsu T: ${thresholds || "-"} · dark ${(lane.darkRatio * 100).toFixed(1)}%`,
         `Conf: ${(lane.laneConfidence * 100).toFixed(0)}% · width ${lane.laneWidth != null ? lane.laneWidth.toFixed(0) : "-"}px`,
         `Err: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px · head ${lane.headingErrorDeg != null ? lane.headingErrorDeg.toFixed(1) : "-"}°`,
-        `Curve: ${lane.curvatureDeg != null ? lane.curvatureDeg.toFixed(1) : "-"}°`
+        `Blue curve: ${lane.blueCurveDirection || "-"} · ${lane.blueCurveSeverity != null ? (lane.blueCurveSeverity * 100).toFixed(0) : "-"}%`
       ];
 
       const boxWidth = Math.min(width - 12, 260);
@@ -2180,5 +2210,7 @@
     }
   }
 
+  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-bluecurve-v2";
+  console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

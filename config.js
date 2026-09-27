@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-precision-v2-4motor-mqtt-v1";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-precision-v2-4motor-mqtt-v1";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · 4-Motor MQTT";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-bluecurve-v2";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-bluecurve-v2";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Blue-Curve FF · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -210,6 +210,36 @@ window.APP_CONFIG = {
     // Nếu một bánh đang tiến nhưng PWM sau mapping thấp hơn mức này,
     // nâng bánh đó lên floor và nâng bánh còn lại cùng lượng để giữ chênh steering.
     LINE_FOLLOW_TORQUE_FLOOR_PWM: 70,
+
+    // ===================================================
+    // BLUE-CURVE FEED-FORWARD
+    // ===================================================
+    // Đường center màu xanh dương là quỹ đạo điều khiển duy nhất.
+    // Severity được tính trực tiếp từ hình học centerCurve xanh:
+    // heading gần->lookahead, độ uốn của curve và độ lệch lookahead.
+    // Cua càng gắt -> yêu cầu chênh PWM trái/phải tối thiểu càng lớn.
+    BLUE_CURVE_FEEDFORWARD_ENABLE: true,
+
+    // Khi severity dưới mức này, không ép thêm PWM gap.
+    BLUE_CURVE_GAP_ACTIVATE_SEVERITY: 0.12,
+
+    // Cua vừa/gắt sẽ nội suy gap từ MIN tới MAX.
+    // Với torque floor 70, cua rất gắt thường sẽ tiến tới khoảng 70/140.
+    BLUE_CURVE_GAP_MIN_PWM: 20,
+    BLUE_CURVE_GAP_MAX_PWM: 70,
+    BLUE_CURVE_GAP_EXPONENT: 1.10,
+
+    // Làm mượt gap để không giật khi severity thay đổi giữa các frame.
+    BLUE_CURVE_GAP_EMA_ALPHA: 0.42,
+    BLUE_CURVE_GAP_MAX_DELTA_PWM: 9,
+
+    // Chuẩn hoá severity từ chính đường xanh.
+    BLUE_CURVE_HEADING_FULL_DEG: 13,
+    BLUE_CURVE_BEND_FULL_DEG: 8,
+    BLUE_CURVE_LATERAL_FULL_RATIO: 0.11,
+
+    // Không sử dụng frame camera quá cũ để tiếp tục lái.
+    VISION_MAX_FRAME_AGE_MS: 160,
 
     // Cảm biến IR của bạn là active-low:
     // true  = nền đường / có tín hiệu

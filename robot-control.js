@@ -349,6 +349,13 @@
       );
 
       setText(
+        "visionBlueCurveState",
+        frame?.blueCurveSeverity != null
+          ? `${frame.blueCurveDirection || "STRAIGHT"} · ${(frame.blueCurveSeverity * 100).toFixed(0)}%`
+          : "-"
+      );
+
+      setText(
         "visionTargetState",
         frame?.lookAheadCenter != null
           ? `x=${frame.lookAheadCenter.toFixed(1)}`

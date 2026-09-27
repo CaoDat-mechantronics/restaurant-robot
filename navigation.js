@@ -77,6 +77,13 @@
       // Trạng thái debug giúp biết vì sao motor đang chạy hoặc bằng 0.
       this.motorReason = "WAITING_TASK";
       this.motorPublishOk = null;
+
+      // Blue-curve feed-forward: chỉ bổ sung độ mạnh steering theo độ cong
+      // của centerCurve xanh, không thay PID Precision V2.
+      this.blueCurveDirection = "STRAIGHT";
+      this.blueCurveSeverity = 0;
+      this.blueCurveTargetGap = 0;
+      this.filteredBlueCurveGap = 0;
     }
 
     // =====================================================
@@ -212,6 +219,11 @@
       this.prevControlAt = 0;
       this.filteredLineDerivative = 0;
       this.filteredPathAngleDerivative = 0;
+      this.blueCurveDirection = "STRAIGHT";
+      this.blueCurveSeverity = 0;
+      this.blueCurveTargetGap = 0;
+      this.filteredBlueCurveGap = 0;
+      this.updateBlueCurveDebugUi();
     }
 
     // =====================================================
@@ -534,6 +546,23 @@
       // ===================================================
       const frame = this.lastVision;
 
+      // Không lái bằng một kết quả vision đã quá cũ.
+      const frameTimestamp = Number(frame?.timestamp);
+      const frameAgeMs = Number.isFinite(frameTimestamp)
+        ? Math.max(0, performance.now() - frameTimestamp)
+        : Infinity;
+      const maxFrameAgeMs = Math.max(80, Number(this.config.VISION_MAX_FRAME_AGE_MS) || 160);
+
+      if (frame && frameAgeMs > maxFrameAgeMs) {
+        this.resetLineController();
+        this.setMotorReason(
+          "STALE_VISION",
+          `Frame cũ ${Math.round(frameAgeMs)} ms → STOP`
+        );
+        this.sendMotor(0, 0, true);
+        return;
+      }
+
       if (
         !frame?.hasLane ||
         frame.lineError == null ||
@@ -614,6 +643,15 @@
       const pathAngleDeg = Number(frame.headingErrorDeg) || 0;
       const curvatureDeg = Number(frame.curvatureDeg) || 0;
       const frameWidth = Math.max(1, Number(frame.width) || 1);
+
+      // Severity/direction lấy trực tiếp từ centerCurve xanh của vision.
+      this.blueCurveSeverity = this.clamp(
+        Number(frame.blueCurveSeverity) || 0,
+        0,
+        1
+      );
+      this.blueCurveDirection = String(frame.blueCurveDirection || "STRAIGHT");
+      this.updateBlueCurveGapTarget();
 
       const positionDeadband = Math.max(
         0,
@@ -1208,16 +1246,20 @@
 
       const boostActive = now < this.motorStartBoostUntil;
 
-      const mapped = this.mapMotorPairToPwm(
+      let mapped = this.mapMotorPairToPwm(
         nextLeft,
         nextRight,
         boostActive
       );
 
+      // Precision V2 quyết định hướng và correction; lớp này chỉ đảm bảo
+      // độ chênh PWM tối thiểu tỷ lệ với độ cong của chính đường xanh.
+      mapped = this.applyBlueCurvePwmGap(mapped);
+
       this.lastMotorAt = now;
       this.lastMotor = {
-        left: mapped.left,
-        right: mapped.right
+        left: Math.round(mapped.left),
+        right: Math.round(mapped.right)
       };
 
       const published = this.mqtt.publishMotor(
@@ -1401,6 +1443,131 @@
       return sign * Math.round(this.clamp(pwm, minRunPwm, maxPwm));
     }
 
+    updateBlueCurveGapTarget() {
+      const enabled = this.config.BLUE_CURVE_FEEDFORWARD_ENABLE !== false;
+      if (!enabled) {
+        this.blueCurveTargetGap = 0;
+        this.filteredBlueCurveGap = 0;
+        this.updateBlueCurveDebugUi();
+        return;
+      }
+
+      const activate = this.clamp(
+        Number(this.config.BLUE_CURVE_GAP_ACTIVATE_SEVERITY) || 0.12,
+        0,
+        0.95
+      );
+      const minGap = Math.max(0, Number(this.config.BLUE_CURVE_GAP_MIN_PWM) || 20);
+      const maxGap = Math.max(minGap, Number(this.config.BLUE_CURVE_GAP_MAX_PWM) || 70);
+      const exponent = Math.max(0.4, Number(this.config.BLUE_CURVE_GAP_EXPONENT) || 1.10);
+
+      let desired = 0;
+      if (this.blueCurveDirection !== "STRAIGHT" && this.blueCurveSeverity > activate) {
+        const normalized = this.clamp(
+          (this.blueCurveSeverity - activate) / Math.max(0.001, 1 - activate),
+          0,
+          1
+        );
+        desired = minGap + Math.pow(normalized, exponent) * (maxGap - minGap);
+      }
+
+      const alpha = this.clamp(
+        Number(this.config.BLUE_CURVE_GAP_EMA_ALPHA) || 0.42,
+        0.05,
+        1
+      );
+      const maxDelta = Math.max(1, Number(this.config.BLUE_CURVE_GAP_MAX_DELTA_PWM) || 9);
+
+      const emaTarget = this.filteredBlueCurveGap + alpha * (desired - this.filteredBlueCurveGap);
+      const delta = this.clamp(
+        emaTarget - this.filteredBlueCurveGap,
+        -maxDelta,
+        maxDelta
+      );
+      this.filteredBlueCurveGap += delta;
+      this.blueCurveTargetGap = Math.round(this.filteredBlueCurveGap);
+      this.updateBlueCurveDebugUi();
+    }
+
+    applyBlueCurvePwmGap(mapped) {
+      const forwardTrackingState =
+        this.state === NAV_STATE.LINE_FOLLOW;
+
+      if (
+        !forwardTrackingState ||
+        this.config.BLUE_CURVE_FEEDFORWARD_ENABLE === false ||
+        !mapped ||
+        mapped.left <= 0 ||
+        mapped.right <= 0
+      ) {
+        return mapped;
+      }
+
+      const desiredGap = Math.max(0, Math.round(this.blueCurveTargetGap || 0));
+      if (desiredGap <= 0) return mapped;
+
+      const maxPwm = this.clamp(
+        Number(this.config.MOTOR_MAX_PWM) || 165,
+        1,
+        255
+      );
+      const torqueFloor = this.clamp(
+        Number(this.config.LINE_FOLLOW_TORQUE_FLOOR_PWM) || 70,
+        1,
+        maxPwm
+      );
+
+      let left = Math.round(mapped.left);
+      let right = Math.round(mapped.right);
+
+      if (this.blueCurveDirection === "LEFT") {
+        // Cua trái: bánh phải là bánh ngoài và phải nhanh hơn bánh trái.
+        left = Math.max(left, torqueFloor);
+        const currentGap = right - left;
+        if (currentGap < desiredGap) {
+          right = Math.min(maxPwm, left + desiredGap);
+          // Nếu bánh ngoài đã chạm max, hạ bánh trong nhưng không dưới torque floor.
+          if (right - left < desiredGap) {
+            left = Math.max(torqueFloor, right - desiredGap);
+          }
+        }
+      }
+      else if (this.blueCurveDirection === "RIGHT") {
+        // Cua phải: bánh trái là bánh ngoài.
+        right = Math.max(right, torqueFloor);
+        const currentGap = left - right;
+        if (currentGap < desiredGap) {
+          left = Math.min(maxPwm, right + desiredGap);
+          if (left - right < desiredGap) {
+            right = Math.max(torqueFloor, left - desiredGap);
+          }
+        }
+      }
+
+      return {
+        left: Math.round(this.clamp(left, 0, maxPwm)),
+        right: Math.round(this.clamp(right, 0, maxPwm))
+      };
+    }
+
+    updateBlueCurveDebugUi() {
+      if (typeof document === "undefined") return;
+
+      const severityText =
+        `${this.blueCurveDirection} · ${Math.round((this.blueCurveSeverity || 0) * 100)}%`;
+      const gapText = `${Math.round(this.blueCurveTargetGap || 0)} PWM`;
+
+      const severityEl = document.getElementById("visionBlueCurveState");
+      const gapEl = document.getElementById("visionCurveGapState");
+      const mainSeverityEl = document.getElementById("blueCurveState");
+      const mainGapEl = document.getElementById("curveGapState");
+
+      if (severityEl) severityEl.textContent = severityText;
+      if (gapEl) gapEl.textContent = gapText;
+      if (mainSeverityEl) mainSeverityEl.textContent = severityText;
+      if (mainGapEl) mainGapEl.textContent = gapText;
+    }
+
     updateMotorDebugUi(left, right) {
       if (typeof document === "undefined") {
         return;
@@ -1422,7 +1589,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-precision-v2-4motor-mqtt-v1";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-bluecurve-v2";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

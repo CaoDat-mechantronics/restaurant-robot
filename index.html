@@ -238,6 +238,8 @@
 
           <div><span>Heading error</span><b id="visionHeadingState">-</b></div>
           <div><span>Curvature</span><b id="visionCurvatureState">-</b></div>
+          <div><span>Blue curve</span><b id="visionBlueCurveState">-</b></div>
+          <div><span>Target PWM gap</span><b id="visionCurveGapState">0 PWM</b></div>
 
           <div><span>QR</span><b id="visionQrState">-</b></div>
           <div><span>QR diện tích</span><b id="visionQrAreaState">-</b></div>
@@ -249,8 +251,8 @@
           <div><span>Firmware ESP32</span><b id="visionFirmwareBuildState">chưa nhận</b></div>
           <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
           <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
-          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Precision V2 · 4-Motor MQTT</b></div>
-          <div><span>Config / Navigation</span><b id="visionModuleBuildState">-</b></div>
+          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Precision V2 · Blue-Curve FF · 4-Motor</b></div>
+          <div><span>Config / Vision / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
 
@@ -409,6 +411,14 @@
             <b id="firmwareBuildState">chưa nhận</b>
           </div>
           <div>
+            <span>Blue curve</span>
+            <b id="blueCurveState">-</b>
+          </div>
+          <div>
+            <span>Target PWM gap</span>
+            <b id="curveGapState">0 PWM</b>
+          </div>
+          <div>
             <span>Lý do motor</span>
             <b id="motorReasonState">WAITING_TASK</b>
           </div>
@@ -418,10 +428,10 @@
           </div>
           <div>
             <span>Source build</span>
-            <b id="sourceBuildState">2026-09-27 · Precision V2 · 4-Motor MQTT</b>
+            <b id="sourceBuildState">2026-09-27 · Precision V2 · Blue-Curve FF · 4-Motor</b>
           </div>
           <div>
-            <span>Config / Navigation</span>
+            <span>Config / Vision / Navigation</span>
             <b id="moduleBuildState">-</b>
           </div>
         </div>
@@ -636,20 +646,20 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20260927-4motor-mqtt-v1"></script>
+<script src="config.js?v=20260927-bluecurve-v2"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
-<script src="audio.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="gemini-live.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="mqtt-robot.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="orientation.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="vision.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="navigation.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="app.js?v=20260927-4motor-mqtt-v1"></script>
-<script src="robot-control.js?v=20260927-4motor-mqtt-v1"></script>
+<script src="audio.js?v=20260927-bluecurve-v2"></script>
+<script src="gemini-live.js?v=20260927-bluecurve-v2"></script>
+<script src="mqtt-robot.js?v=20260927-bluecurve-v2"></script>
+<script src="orientation.js?v=20260927-bluecurve-v2"></script>
+<script src="vision.js?v=20260927-bluecurve-v2"></script>
+<script src="navigation.js?v=20260927-bluecurve-v2"></script>
+<script src="app.js?v=20260927-bluecurve-v2"></script>
+<script src="robot-control.js?v=20260927-bluecurve-v2"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
@@ -658,11 +668,12 @@
     || "unknown";
 
   const configBuild = window.ROBOT_CONFIG_BUILD || "unknown";
+  const visionBuild = window.ROBOT_VISION_BUILD || "unknown";
   const navBuild = window.ROBOT_NAV_BUILD || "unknown";
   const mqttBuild = window.ROBOT_MQTT_BUILD || "unknown";
   const controlBuild = window.ROBOT_CONTROL_BUILD || "unknown";
   const moduleBuild =
-    `CFG: ${configBuild} · NAV: ${navBuild} · MQTT: ${mqttBuild} · CTRL: ${controlBuild}`;
+    `CFG: ${configBuild} · VIS: ${visionBuild} · NAV: ${navBuild} · MQTT: ${mqttBuild} · CTRL: ${controlBuild}`;
 
   const setText = (id, value) => {
     const element = document.getElementById(id);
