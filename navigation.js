@@ -63,6 +63,12 @@
       this.prevPathAngle = null;
       this.filteredPathAngleDerivative = 0;
 
+      // ADAS curve feed-forward được vision tính từ nhiều điểm trên center trajectory.
+      this.currentCurveSeverity = 0;
+      this.currentCurveDirection = "STRAIGHT";
+      this.currentCurveDesiredPwmGap = 0;
+      this.filteredCurveDesiredPwmGap = 0;
+
       this.turnStartYaw = null;
       this.turnDirection = null;
       this.reacquireStableFrames = 0;
@@ -212,6 +218,10 @@
       this.prevControlAt = 0;
       this.filteredLineDerivative = 0;
       this.filteredPathAngleDerivative = 0;
+      this.currentCurveSeverity = 0;
+      this.currentCurveDirection = "STRAIGHT";
+      this.currentCurveDesiredPwmGap = 0;
+      this.filteredCurveDesiredPwmGap = 0;
     }
 
     // =====================================================
@@ -534,6 +544,27 @@
       // ===================================================
       const frame = this.lastVision;
 
+      // Không lái bằng kết quả vision quá cũ. Nếu camera/JS bị khựng,
+      // dừng thay vì tiếp tục chạy theo frame đường thẳng trước đó.
+      const frameTimestamp = Number(frame?.timestampMs);
+      const frameAgeMs = Number.isFinite(frameTimestamp)
+        ? performance.now() - frameTimestamp
+        : 0;
+      const maxFrameAgeMs = Math.max(
+        80,
+        Number(this.config.VISION_MAX_FRAME_AGE_MS) || 140
+      );
+
+      if (frame && Number.isFinite(frameTimestamp) && frameAgeMs > maxFrameAgeMs) {
+        this.resetLineController();
+        this.setMotorReason(
+          "STALE_VISION",
+          `frame=${Math.round(frameAgeMs)}ms`
+        );
+        this.sendMotor(0, 0, true);
+        return;
+      }
+
       if (
         !frame?.hasLane ||
         frame.lineError == null ||
@@ -613,6 +644,14 @@
       const curveDx = lookAheadCenter - laneCenter;
       const pathAngleDeg = Number(frame.headingErrorDeg) || 0;
       const curvatureDeg = Number(frame.curvatureDeg) || 0;
+      const curveSeverity = this.clamp(
+        Number(frame.curveSeverity) || 0,
+        0,
+        1
+      );
+      const curveDirection = String(
+        frame.curveDirection || "STRAIGHT"
+      ).toUpperCase();
       const frameWidth = Math.max(1, Number(frame.width) || 1);
 
       const positionDeadband = Math.max(
@@ -893,14 +932,63 @@
       );
 
       const directionText =
-        pathAngle < -angleDeadband
-          ? "LEFT"
-          : pathAngle > angleDeadband
-            ? "RIGHT"
-            : "STRAIGHT";
+        curveDirection === "LEFT" || curveDirection === "RIGHT"
+          ? curveDirection
+          : pathAngle < -angleDeadband
+            ? "LEFT"
+            : pathAngle > angleDeadband
+              ? "RIGHT"
+              : "STRAIGHT";
+
+      // Độ chênh PWM mục tiêu được suy ra trực tiếp từ độ cong của
+      // center trajectory. PID V2 vẫn quyết định target logic; feed-forward
+      // này chỉ đảm bảo cua càng gắt thì differential PWM càng lớn.
+      const gapEnabled = this.config.CURVE_PWM_GAP_ENABLE !== false;
+      const gapActivate = this.clamp(
+        Number(this.config.CURVE_PWM_GAP_ACTIVATE_SEVERITY) || 0.10,
+        0,
+        0.95
+      );
+      const gapMin = Math.max(0, Number(this.config.CURVE_PWM_GAP_MIN) || 12);
+      const gapMax = Math.max(gapMin, Number(this.config.CURVE_PWM_GAP_MAX) || 72);
+      const gapExponent = this.clamp(
+        Number(this.config.CURVE_PWM_GAP_EXPONENT) || 1.15,
+        0.5,
+        3
+      );
+
+      let desiredGap = 0;
+      if (gapEnabled && curveSeverity >= gapActivate && directionText !== "STRAIGHT") {
+        const normalizedSeverity = this.clamp(
+          (curveSeverity - gapActivate) / Math.max(0.001, 1 - gapActivate),
+          0,
+          1
+        );
+        desiredGap = gapMin +
+          Math.pow(normalizedSeverity, gapExponent) * (gapMax - gapMin);
+      }
+
+      const gapAlpha = this.clamp(
+        Number(this.config.CURVE_PWM_GAP_EMA_ALPHA) || 0.32,
+        0.08,
+        1
+      );
+      this.filteredCurveDesiredPwmGap +=
+        gapAlpha * (desiredGap - this.filteredCurveDesiredPwmGap);
+
+      // Khi đường trở lại thẳng, cho gap decay nhanh hơn để không giữ cua cũ.
+      if (directionText === "STRAIGHT" || curveSeverity < gapActivate * 0.7) {
+        this.filteredCurveDesiredPwmGap *= 0.55;
+      }
+
+      this.currentCurveSeverity = curveSeverity;
+      this.currentCurveDirection = directionText;
+      this.currentCurveDesiredPwmGap = Math.max(0, this.filteredCurveDesiredPwmGap);
 
       const debugDetail =
         `${directionText} · angle=${pathAngleDeg.toFixed(1)}°` +
+        ` · curve=${Math.round(curveSeverity * 100)}%` +
+        ` · gap>=${Math.round(this.currentCurveDesiredPwmGap)}` +
         ` · pinkDx=${Math.round(curveDx)}px` +
         ` · pos=${Math.round(lineError)}px` +
         ` · conf=${confidence.toFixed(2)}`;
@@ -960,6 +1048,7 @@
         Number(this.config.TURN_MAX_DEG) || 112;
 
       const frame = this.lastVision;
+
       const confidence = Number(frame?.laneConfidence) || 0;
       const minConfidence =
         Number(this.config.VISION_MIN_CONFIDENCE) || 0.38;
@@ -1351,6 +1440,37 @@
         }
       }
 
+      // ---------------------------------------------------
+      // ADAS CURVE GAP FEED-FORWARD
+      // ---------------------------------------------------
+      // Sau torque floor, đảm bảo chênh PWM vật lý tăng theo độ cong của
+      // center trajectory. Không áp dụng khi đi thẳng hoặc TURNING.
+      // Bánh trong không bị hạ dưới torque floor; ưu tiên tăng bánh ngoài.
+      if (forwardTrackingState && leftPwm > 0 && rightPwm > 0) {
+        const desiredGap = Math.max(0, Number(this.currentCurveDesiredPwmGap) || 0);
+        const direction = String(this.currentCurveDirection || "STRAIGHT");
+        const actualGap = Math.abs(rightPwm - leftPwm);
+
+        if (desiredGap > actualGap + 0.5) {
+          if (direction === "LEFT") {
+            // Cua trái: Right phải nhanh hơn Left.
+            if (rightPwm < leftPwm) {
+              rightPwm = leftPwm;
+            }
+            const targetRight = Math.min(maxPwm, leftPwm + desiredGap);
+            rightPwm = Math.max(rightPwm, targetRight);
+          }
+          else if (direction === "RIGHT") {
+            // Cua phải: Left phải nhanh hơn Right.
+            if (leftPwm < rightPwm) {
+              leftPwm = rightPwm;
+            }
+            const targetLeft = Math.min(maxPwm, rightPwm + desiredGap);
+            leftPwm = Math.max(leftPwm, targetLeft);
+          }
+        }
+      }
+
       // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá chênh lệch
       // trái/phải. Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
       if (boostActive) {
@@ -1422,7 +1542,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-precision-v2-minimal-torque-ui1";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-adas-curve-v1";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

@@ -59,6 +59,7 @@
       this.prevControlCenter = null;
       this.prevLookAheadCenter = null;
       this.prevLaneWidthNear = null;
+      this.prevCurveSeverity = 0;
 
       // Mô hình bề rộng làn được học CHỈ từ frame thật sự thấy đủ 2 biên.
       // Khi mất 1 biên, detector chỉ đọc model này để dựng biên ảo,
@@ -275,6 +276,7 @@
       this.prevControlCenter = null;
       this.prevLookAheadCenter = null;
       this.prevLaneWidthNear = null;
+      this.prevCurveSeverity = 0;
       this.prevLaneWidthCurve = null;
       this.oneLineFrames = 0;
       this.unobservedFrames = 0;
@@ -1565,6 +1567,13 @@
           : null;
 
       let curvatureDeg = null;
+      let trajectoryPoints = [];
+      let trajectoryNearHeadingDeg = null;
+      let trajectoryFarHeadingDeg = null;
+      let trajectoryBendDeg = null;
+      let curveSeverityRaw = 0;
+      let curveSeverity = 0;
+      let curveDirection = "STRAIGHT";
 
       if (centerCurve) {
         const farT = Math.max(0.08, lookAheadT - 0.20);
@@ -1582,6 +1591,110 @@
         ) * 180 / Math.PI;
 
         curvatureDeg = headingFar - headingNear;
+
+        // ADAS-inspired: sample nhiều điểm trên center trajectory.
+        // t=nearT ở gần robot, t nhỏ hơn nhìn xa hơn trong hành lang lane.
+        const sampleCount = Math.max(
+          5,
+          Math.round(Number(this.config.VISION_TRAJECTORY_SAMPLE_COUNT) || 7)
+        );
+        const configuredFarT = Number(this.config.VISION_TRAJECTORY_FAR_T);
+        const trajectoryFarT = this.clamp(
+          Number.isFinite(configuredFarT) ? configuredFarT : 0.22,
+          0.06,
+          Math.max(0.08, nearT - 0.08)
+        );
+
+        for (let i = 0; i < sampleCount; i += 1) {
+          const ratio = sampleCount <= 1 ? 0 : i / (sampleCount - 1);
+          const t = nearT + (trajectoryFarT - nearT) * ratio;
+          const x = this.evalCurve(centerCurve, t);
+          const derivative = this.curveDerivative(centerCurve, t);
+          const headingDeg = Math.atan2(
+            -derivative,
+            roiHeight
+          ) * 180 / Math.PI;
+
+          if (Number.isFinite(x) && Number.isFinite(headingDeg)) {
+            trajectoryPoints.push({
+              x,
+              y: roiTop + t * roiHeight,
+              t,
+              headingDeg
+            });
+          }
+        }
+
+        if (trajectoryPoints.length >= 2) {
+          trajectoryNearHeadingDeg = trajectoryPoints[0].headingDeg;
+          trajectoryFarHeadingDeg =
+            trajectoryPoints[trajectoryPoints.length - 1].headingDeg;
+          trajectoryBendDeg =
+            trajectoryFarHeadingDeg - trajectoryNearHeadingDeg;
+
+          const fullHeading = Math.max(
+            5,
+            Number(this.config.VISION_TRAJECTORY_FULL_HEADING_DEG) || 17
+          );
+          const fullBend = Math.max(
+            4,
+            Number(this.config.VISION_TRAJECTORY_FULL_BEND_DEG) || 11
+          );
+
+          const headingSeverity = this.clamp(
+            Math.abs(trajectoryFarHeadingDeg) / fullHeading,
+            0,
+            1
+          );
+          const bendSeverity = this.clamp(
+            Math.abs(trajectoryBendDeg) / fullBend,
+            0,
+            1
+          );
+          const lookAheadSeverity = this.clamp(
+            Math.abs(headingErrorDeg || 0) /
+              Math.max(6, Number(this.config.PATH_FULL_SLOWDOWN_DEG) || 15),
+            0,
+            1
+          );
+
+          // Dùng tín hiệu mạnh nhất để không bỏ sót cua gấp ở xa,
+          // sau đó EMA để motor không giật theo từng frame.
+          curveSeverityRaw = this.clamp(
+            Math.max(
+              lookAheadSeverity,
+              0.80 * headingSeverity + 0.20 * bendSeverity,
+              0.65 * bendSeverity + 0.35 * headingSeverity
+            ),
+            0,
+            1
+          );
+
+          const severityAlpha = this.clamp(
+            Number(this.config.VISION_CURVE_SEVERITY_EMA_ALPHA) || 0.38,
+            0.08,
+            1
+          );
+          this.prevCurveSeverity +=
+            severityAlpha * (curveSeverityRaw - this.prevCurveSeverity);
+          curveSeverity = this.clamp(this.prevCurveSeverity, 0, 1);
+
+          const directionSignal =
+            0.55 * (headingErrorDeg || 0) +
+            0.30 * trajectoryFarHeadingDeg +
+            0.15 * trajectoryBendDeg;
+
+          if (directionSignal < -1.0) {
+            curveDirection = "LEFT";
+          }
+          else if (directionSignal > 1.0) {
+            curveDirection = "RIGHT";
+          }
+        }
+      }
+      else {
+        this.prevCurveSeverity *= 0.75;
+        curveSeverity = this.prevCurveSeverity;
       }
 
       const minConfidence = this.clamp(
@@ -1731,6 +1844,14 @@
         lineError,
         headingErrorDeg,
         curvatureDeg,
+        trajectoryPoints,
+        trajectoryNearHeadingDeg,
+        trajectoryFarHeadingDeg,
+        trajectoryBendDeg,
+        curveSeverityRaw,
+        curveSeverity,
+        curveDirection,
+        timestampMs: performance.now(),
         laneWidth: Number.isFinite(laneWidthNear) ? laneWidthNear : null,
 
         nearT,
@@ -1883,6 +2004,27 @@
         3
       );
 
+      // Center trajectory nhiều điểm dùng để ước lượng curveSeverity.
+      if (Array.isArray(lane.trajectoryPoints) && lane.trajectoryPoints.length >= 2) {
+        ctx.save();
+        ctx.strokeStyle = "#ee46bc";
+        ctx.fillStyle = "#ee46bc";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        lane.trajectoryPoints.forEach((point, index) => {
+          if (index === 0) ctx.moveTo(point.x, point.y);
+          else ctx.lineTo(point.x, point.y);
+        });
+        ctx.stroke();
+
+        for (const point of lane.trajectoryPoints) {
+          ctx.beginPath();
+          ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
       // Tâm camera.
       ctx.strokeStyle = "#fdb022";
       ctx.lineWidth = 2;
@@ -1952,7 +2094,8 @@
         `Otsu T: ${thresholds || "-"} · dark ${(lane.darkRatio * 100).toFixed(1)}%`,
         `Conf: ${(lane.laneConfidence * 100).toFixed(0)}% · width ${lane.laneWidth != null ? lane.laneWidth.toFixed(0) : "-"}px`,
         `Err: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px · head ${lane.headingErrorDeg != null ? lane.headingErrorDeg.toFixed(1) : "-"}°`,
-        `Curve: ${lane.curvatureDeg != null ? lane.curvatureDeg.toFixed(1) : "-"}°`
+        `Curve: ${lane.curvatureDeg != null ? lane.curvatureDeg.toFixed(1) : "-"}° · severity ${Math.round((lane.curveSeverity || 0) * 100)}%`,
+        `Trajectory: ${lane.curveDirection || "STRAIGHT"} · far ${lane.trajectoryFarHeadingDeg != null ? lane.trajectoryFarHeadingDeg.toFixed(1) : "-"}° · bend ${lane.trajectoryBendDeg != null ? lane.trajectoryBendDeg.toFixed(1) : "-"}°`
       ];
 
       const boxWidth = Math.min(width - 12, 260);
@@ -2180,5 +2323,7 @@
     }
   }
 
+  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-adas-curve-v1";
+  console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

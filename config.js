@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-precision-v2-minimal-torque-ui1";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-precision-v2-minimal-torque-ui1";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Gear120 Precision V2 · Torque70";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-adas-curve-v1";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-adas-curve-v1";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Gear120 ADAS Curve V1";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -98,18 +98,35 @@ window.APP_CONFIG = {
     // Quá thời gian này phải bắt lại đủ 2 vạch, nếu không coi là mất line.
     VISION_ONE_LINE_MAX_FRAMES: 45,
 
-    // Nếu mất cả hai vạch, giữ quỹ đạo cũ tối đa vài frame để tránh giật.
-    VISION_LOST_PREDICT_FRAMES: 4,
+    // Nếu mất cả hai vạch chỉ giữ quỹ đạo cũ rất ngắn.
+    // Tránh tiếp tục lái theo hình học của frame thẳng trước khi xe đã vào cua.
+    VISION_LOST_PREDICT_FRAMES: 2,
     VISION_LOST_PREDICT_CONFIDENCE: 0.56,
 
-    // Tâm điều khiển được lọc riêng để xe không giật trái/phải liên tục.
-    VISION_CENTER_EMA_ALPHA: 0.20,
-    VISION_MAX_CENTER_JUMP_PX: 26,
+    // Tăng alpha để center/look-ahead phản ứng nhanh hơn với cua thật.
+    VISION_CENTER_EMA_ALPHA: 0.34,
+    VISION_MAX_CENTER_JUMP_PX: 32,
+
+    // Frame vision quá cũ thì không được tiếp tục dùng để lái.
+    VISION_MAX_FRAME_AGE_MS: 140,
 
     // Điểm gần dùng để đo lệch ngang và điểm nhìn trước dùng để bắt cua sớm.
     // 0 = đầu ROI (xa), 1 = cuối ROI (gần robot).
     VISION_NEAR_Y_RATIO: 0.88,
     VISION_LOOKAHEAD_Y_RATIO: 0.42,
+
+    // ---------------------------------------------------
+    // ADAS-INSPIRED LANE CORRIDOR / CENTER TRAJECTORY
+    // ---------------------------------------------------
+    // Vision đã fit hai biên lane thành curve. Bản này sample nhiều điểm
+    // trên center curve để ước lượng độ cong của cả hành lang thay vì
+    // chỉ dựa vào một điểm look-ahead duy nhất.
+    VISION_TRAJECTORY_SAMPLE_COUNT: 7,
+    VISION_TRAJECTORY_FAR_T: 0.22,
+    VISION_TRAJECTORY_FULL_HEADING_DEG: 17,
+    VISION_TRAJECTORY_FULL_BEND_DEG: 11,
+    VISION_CURVE_SEVERITY_EMA_ALPHA: 0.38,
+
 
     // Confidence thấp thì navigation giảm tốc hoặc dừng.
     VISION_MIN_CONFIDENCE: 0.38,
@@ -163,6 +180,18 @@ window.APP_CONFIG = {
 
     // Feed-forward nhỏ theo độ cong của center curve.
     CURVATURE_KP: 0.09,
+
+    // ADAS curve feed-forward:
+    // curveSeverity=0..1 được tính từ nhiều điểm trên center trajectory.
+    // Nó KHÔNG thay PID V2; chỉ yêu cầu chênh PWM vật lý tối thiểu tăng
+    // theo độ gắt của cua.
+    CURVE_PWM_GAP_ENABLE: true,
+    CURVE_PWM_GAP_ACTIVATE_SEVERITY: 0.10,
+    CURVE_PWM_GAP_MIN: 12,
+    CURVE_PWM_GAP_MAX: 72,
+    CURVE_PWM_GAP_EXPONENT: 1.15,
+    CURVE_PWM_GAP_EMA_ALPHA: 0.32,
+
 
     // Deadband chống rung khi gần thẳng / gần tâm.
     PATH_ANGLE_DEADBAND_DEG: 1.2,
