@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-web-bev-curvature-v1";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-web-bev-curvature-v1";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Web BEV Curvature V1 · Camera Only · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Web BEV Curvature V2 · Tangent Intent · Camera Only · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -118,8 +118,9 @@ window.APP_CONFIG = {
     // Heading điều khiển ưu tiên tiếp tuyến cục bộ, nhưng giữ một phần look-ahead xa.
     VISION_LOCAL_HEADING_CONTROL_WEIGHT: 0.80,
 
-    // Đường vàng là HƯỚNG CAMERA thật: đoạn thẳng đứng, rất ngắn tại tâm camera.
-    VISION_CAMERA_HEADING_LENGTH_RATIO: 0.06,
+    // Đường vàng là HƯỚNG CAMERA MỤC TIÊU: tiếp tuyến của centerCurve
+    // tại adaptive look-ahead. Trục camera hiện tại được vẽ xám, thẳng đứng.
+    VISION_CAMERA_HEADING_LENGTH_RATIO: 0.075,
 
     // ===================================================
     // VIRTUAL BIRD'S-EYE / LANE-NORMALIZED GEOMETRY
@@ -143,9 +144,11 @@ window.APP_CONFIG = {
     VISION_BEV_HEADING_FULL_DEG: 18,
     VISION_BEV_LOOKAHEAD_EMA_ALPHA: 0.38,
 
-    // Pure-pursuit + curvature của polynomial.
-    VISION_BEV_PURE_PURSUIT_WEIGHT: 0.65,
-    VISION_BEV_GEOMETRY_WEIGHT: 0.35,
+    // V2: KHÔNG trộn pure-pursuit target-X vào hướng cua.
+    // target-X phụ thuộc vị trí robot trong lane và có thể đảo dấu cua.
+    // Hướng cua phải đến từ hình dạng/tangent của polynomial centerCurve.
+    VISION_BEV_PATH_GEOMETRY_WEIGHT: 0.62,
+    VISION_BEV_PREVIEW_HEADING_WEIGHT: 0.38,
 
     // Curvature tăng nhanh khi vào cua nhưng giảm chậm hơn một chút để tránh
     // 1 frame nhận sai làm robot đột ngột đi thẳng giữa cua.
@@ -307,11 +310,21 @@ window.APP_CONFIG = {
     CURVATURE_HEADING_FULL_DEG: 18,
     CURVATURE_HEADING_D_FULL_DEG_S: 120,
 
-    CURVATURE_WEIGHT_TARGET: 1.30,
-    CURVATURE_WEIGHT_LATERAL: 0.68,
-    CURVATURE_WEIGHT_HEADING: 0.62,
-    CURVATURE_WEIGHT_HEADING_D: 0.10,
+    CURVATURE_WEIGHT_TARGET: 1.55,
+    CURVATURE_WEIGHT_LATERAL: 0.36,
+    CURVATURE_WEIGHT_HEADING: 0.82,
+    CURVATURE_WEIGHT_HEADING_D: 0.07,
     CURVATURE_SOFT_SCALE: 1.05,
+
+    // Khi đường xanh có curvature rõ ràng, lateral error KHÔNG được phép
+    // đảo hướng cua. Chỉ cho phép đảo nếu robot lệch lane cực lớn.
+    CURVATURE_DIRECTION_LOCK_NORM: 0.13,
+    CURVATURE_DIRECTION_OVERRIDE_LATERAL_NORM: 0.88,
+    CURVATURE_DIRECTION_MIN_COMMAND: 0.10,
+
+    // Lọc turn-ratio để motor không đổi trái/phải theo từng frame.
+    CURVATURE_TURN_RATIO_EMA_ALPHA: 0.44,
+    CURVATURE_TURN_RATIO_MAX_DELTA: 0.11,
 
     // turnRatio=0 -> hai bên bằng nhau; |turnRatio| tăng liên tục theo sai số.
     // Không phải gap PWM cố định.

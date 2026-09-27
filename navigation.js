@@ -236,6 +236,7 @@
       this.prevControlAt = 0;
       this.filteredLineDerivative = 0;
       this.filteredPathAngleDerivative = 0;
+      this.filteredTurnRatio = 0;
       this.blueCurveDirection = "STRAIGHT";
       this.blueCurveSeverity = 0;
       this.blueCurveTargetGap = 0;
@@ -624,14 +625,66 @@
       const wHeading = Number(this.config.CURVATURE_WEIGHT_HEADING) || 0.62;
       const wHeadingD = Number(this.config.CURVATURE_WEIGHT_HEADING_D) || 0.10;
 
-      const rawSteering =
+      let rawSteering =
         wCurvature * curvatureNorm +
         wLateral * lateralNorm +
         wHeading * headingNorm +
         wHeadingD * headingDNorm;
 
-      const softScale = Math.max(0.25, Number(this.config.CURVATURE_SOFT_SCALE) || 1.05);
-      const steeringCommand = Math.tanh(rawSteering / softScale);
+      // ===================================================
+      // PATH-DIRECTION LOCK
+      // ===================================================
+      // targetCurvature is path shape only in BEV V2.
+      // When the road is clearly LEFT/RIGHT, a small lateral offset must
+      // not flip the steering direction.
+      const directionLockNorm = this.clamp(
+        Number(this.config.CURVATURE_DIRECTION_LOCK_NORM) || 0.13,
+        0.03,
+        0.80
+      );
+
+      const lateralOverrideNorm = this.clamp(
+        Number(this.config.CURVATURE_DIRECTION_OVERRIDE_LATERAL_NORM) || 0.88,
+        0.45,
+        1.0
+      );
+
+      const minDirectionCommand = this.clamp(
+        Number(this.config.CURVATURE_DIRECTION_MIN_COMMAND) || 0.10,
+        0.02,
+        0.50
+      );
+
+      const curveSign =
+        Math.abs(curvatureNorm) >= directionLockNorm
+          ? Math.sign(curvatureNorm)
+          : 0;
+
+      if (
+        curveSign !== 0 &&
+        Math.abs(lateralNorm) < lateralOverrideNorm &&
+        Math.sign(rawSteering) !== curveSign
+      ) {
+        rawSteering =
+          curveSign *
+          Math.max(
+            minDirectionCommand,
+            Math.min(
+              0.45,
+              Math.abs(curvatureNorm) * 0.72
+            )
+          );
+      }
+
+      const softScale = Math.max(
+        0.25,
+        Number(this.config.CURVATURE_SOFT_SCALE) || 1.05
+      );
+
+      const steeringCommand =
+        Math.tanh(
+          rawSteering / softScale
+        );
 
       const severity = this.clamp(
         Math.max(
@@ -682,19 +735,72 @@
       // ===================================================
       // Positive = turn RIGHT -> left faster, right slower.
       // Negative = turn LEFT  -> left slower, right faster.
-      const maxTurnRatio = this.clamp(Number(this.config.CURVATURE_MAX_TURN_RATIO) || 0.82, 0.20, 0.95);
-      let turnRatio = steeringCommand * maxTurnRatio;
+      const maxTurnRatio = this.clamp(
+        Number(this.config.CURVATURE_MAX_TURN_RATIO) || 0.82,
+        0.20,
+        0.95
+      );
+
+      let targetTurnRatio =
+        steeringCommand * maxTurnRatio;
 
       if (oneLineMode) {
-        turnRatio *= this.clamp(Number(this.config.ONE_LINE_STEERING_GAIN) || 1.08, 0.75, 1.25);
-      }
-      if (predictedMode) {
-        // Keep direction but reduce authority while using a predicted frame.
-        turnRatio *= this.clamp(Number(this.config.LOST_PREDICT_STEERING_GAIN) || 0.82, 0.35, 0.95);
+        targetTurnRatio *= this.clamp(
+          Number(this.config.ONE_LINE_STEERING_GAIN) || 1.08,
+          0.75,
+          1.25
+        );
       }
 
-      let leftTarget = baseSpeed * (1 + turnRatio);
-      let rightTarget = baseSpeed * (1 - turnRatio);
+      if (predictedMode) {
+        // Keep direction but reduce authority while using a predicted frame.
+        targetTurnRatio *= this.clamp(
+          Number(this.config.LOST_PREDICT_STEERING_GAIN) || 0.82,
+          0.35,
+          0.95
+        );
+      }
+
+      // Smooth the final steering request itself, so a noisy frame cannot
+      // instantly swap motor sides.
+      const turnAlpha = this.clamp(
+        Number(this.config.CURVATURE_TURN_RATIO_EMA_ALPHA) || 0.44,
+        0.08,
+        1
+      );
+
+      const turnMaxDelta = this.clamp(
+        Number(this.config.CURVATURE_TURN_RATIO_MAX_DELTA) || 0.11,
+        0.02,
+        0.40
+      );
+
+      const emaTarget =
+        this.filteredTurnRatio +
+        turnAlpha *
+          (targetTurnRatio - this.filteredTurnRatio);
+
+      const turnDelta = this.clamp(
+        emaTarget - this.filteredTurnRatio,
+        -turnMaxDelta,
+        turnMaxDelta
+      );
+
+      this.filteredTurnRatio =
+        this.clamp(
+          this.filteredTurnRatio + turnDelta,
+          -maxTurnRatio,
+          maxTurnRatio
+        );
+
+      const turnRatio =
+        this.filteredTurnRatio;
+
+      let leftTarget =
+        baseSpeed * (1 + turnRatio);
+
+      let rightTarget =
+        baseSpeed * (1 - turnRatio);
 
       // Preserve left/right ratio when the outside wheel would exceed max.
       const peak = Math.max(leftTarget, rightTarget);
@@ -715,7 +821,12 @@
       rightTarget = this.clamp(rightTarget, minForwardLogical, maxSpeed);
 
       this.blueCurveSeverity = this.clamp(Number(frame.blueCurveSeverity) || severity, 0, 1);
-      this.blueCurveDirection = String(frame.blueCurveDirection || (targetCurvature < -0.03 ? "LEFT" : targetCurvature > 0.03 ? "RIGHT" : "STRAIGHT"));
+      this.blueCurveDirection =
+        targetCurvature < -0.025
+          ? "LEFT"
+          : targetCurvature > 0.025
+            ? "RIGHT"
+            : String(frame.blueCurveDirection || "STRAIGHT");
 
       this.geometryControl = {
         lateralNorm,
@@ -733,11 +844,12 @@
       };
       this.updateGeometryControllerDebug();
 
-      const direction = targetCurvature < -0.03
-        ? "LEFT"
-        : targetCurvature > 0.03
-          ? "RIGHT"
-          : "STRAIGHT";
+      const direction =
+        targetCurvature < -0.025
+          ? "LEFT"
+          : targetCurvature > 0.025
+            ? "RIGHT"
+            : "STRAIGHT";
 
       const detail =
         `${direction} · κ=${targetCurvature.toFixed(2)}` +
@@ -1338,7 +1450,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-web-bev-curvature-v1";
+  window.ROBOT_NAV_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

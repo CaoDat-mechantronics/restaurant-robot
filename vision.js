@@ -1067,12 +1067,15 @@
         0.25,
         Number(this.config.VISION_BEV_CURVATURE_FULL) || 1.35
       );
+
       const headingFull = Math.max(
         5,
         Number(this.config.VISION_BEV_HEADING_FULL_DEG) || 18
       );
 
-      const severity = this.clamp(
+      // Initial severity is based on the actual path shape, not on where
+      // the path happens to sit relative to the camera center.
+      const provisionalSeverity = this.clamp(
         Math.max(
           Math.abs(provisionalCurvature) / curvatureFull,
           Math.abs(localHeadingDeg) / headingFull
@@ -1086,6 +1089,7 @@
         0.12,
         0.55
       );
+
       const farLookaheadU = this.clamp(
         Number(this.config.VISION_BEV_LOOKAHEAD_FAR_U) || 0.70,
         nearLookaheadU + 0.10,
@@ -1093,7 +1097,8 @@
       );
 
       const rawLookaheadU =
-        farLookaheadU - severity * (farLookaheadU - nearLookaheadU);
+        farLookaheadU -
+        provisionalSeverity * (farLookaheadU - nearLookaheadU);
 
       const lookaheadAlpha = this.clamp(
         Number(this.config.VISION_BEV_LOOKAHEAD_EMA_ALPHA) || 0.38,
@@ -1108,52 +1113,125 @@
 
       this.prevBevLookaheadU = lookaheadU;
 
-      const targetX = this.evalCurve(fit, lookaheadU);
-      const lookaheadSq = Math.max(0.02, lookaheadU * lookaheadU);
-      const ppCurvature =
-        2 * targetX / Math.max(0.025, targetX * targetX + lookaheadSq);
+      // ----------------------------------------------------
+      // DESIRED TANGENT
+      // ----------------------------------------------------
+      // u=0 is near the robot, u increases forward.
+      // x increases to image/right side.
+      // Therefore:
+      //   desiredTangentDeg < 0 => path wants LEFT
+      //   desiredTangentDeg > 0 => path wants RIGHT
+      const desiredDerivative =
+        this.curveDerivative(fit, lookaheadU);
 
-      const derivativeAtTarget = this.curveDerivative(fit, lookaheadU);
+      const desiredTangentDeg =
+        Math.atan(desiredDerivative) * 180 / Math.PI;
+
+      const previewDeltaU = Math.max(
+        0.08,
+        lookaheadU - localProbeU
+      );
+
+      const previewHeadingDeltaDeg =
+        desiredTangentDeg - localHeadingDeg;
+
+      const previewHeadingCurvature =
+        (previewHeadingDeltaDeg * Math.PI / 180) /
+        previewDeltaU;
+
+      // Polynomial curvature at the control/look-ahead point.
       const geometryCurvature =
         secondDerivative /
-        Math.pow(1 + derivativeAtTarget * derivativeAtTarget, 1.5);
+        Math.pow(
+          1 + desiredDerivative * desiredDerivative,
+          1.5
+        );
 
-      const ppWeight = this.clamp(
-        Number(this.config.VISION_BEV_PURE_PURSUIT_WEIGHT) || 0.65,
-        0,
-        1
+      // Pure pursuit is retained ONLY as a diagnostic position-correction
+      // value. It no longer determines left/right curve intent.
+      const targetX = this.evalCurve(fit, lookaheadU);
+      const lookaheadSq = Math.max(
+        0.02,
+        lookaheadU * lookaheadU
       );
+
+      const purePursuitCurvature =
+        2 * targetX /
+        Math.max(
+          0.025,
+          targetX * targetX + lookaheadSq
+        );
+
       const geoWeight = this.clamp(
-        Number(this.config.VISION_BEV_GEOMETRY_WEIGHT) || 0.35,
+        Number(this.config.VISION_BEV_PATH_GEOMETRY_WEIGHT) || 0.62,
         0,
         1
       );
-      const weightSum = Math.max(0.001, ppWeight + geoWeight);
 
+      const previewWeight = this.clamp(
+        Number(this.config.VISION_BEV_PREVIEW_HEADING_WEIGHT) || 0.38,
+        0,
+        1
+      );
+
+      const weightSum = Math.max(
+        0.001,
+        geoWeight + previewWeight
+      );
+
+      // CRITICAL V2 CHANGE:
+      // Curve direction comes only from path shape:
+      //   geometry curvature + change in tangent heading.
+      // Lateral offset / pure-pursuit target X cannot flip its sign.
       const rawTargetCurvature =
-        (ppCurvature * ppWeight + geometryCurvature * geoWeight) / weightSum;
+        (
+          geometryCurvature * geoWeight +
+          previewHeadingCurvature * previewWeight
+        ) / weightSum;
+
+      const severity = this.clamp(
+        Math.max(
+          Math.abs(rawTargetCurvature) / curvatureFull,
+          Math.abs(desiredTangentDeg) / headingFull,
+          provisionalSeverity * 0.75
+        ),
+        0,
+        1
+      );
 
       const riseAlpha = this.clamp(
         Number(this.config.VISION_BEV_CURVATURE_RISE_ALPHA) || 0.52,
         0.05,
         1
       );
+
       const fallAlpha = this.clamp(
         Number(this.config.VISION_BEV_CURVATURE_FALL_ALPHA) || 0.24,
         0.03,
         1
       );
 
-      const previous = Number(this.prevBevTargetCurvature) || 0;
-      const sameDirection = rawTargetCurvature * previous >= 0;
+      const previous =
+        Number(this.prevBevTargetCurvature) || 0;
+
+      const sameDirection =
+        rawTargetCurvature * previous >= 0;
+
       const isFalling =
         sameDirection &&
-        Math.abs(rawTargetCurvature) < Math.abs(previous);
-      const alpha = isFalling ? fallAlpha : riseAlpha;
+        Math.abs(rawTargetCurvature) <
+          Math.abs(previous);
+
+      const alpha =
+        isFalling ? fallAlpha : riseAlpha;
 
       const targetCurvature =
-        previous + alpha * (rawTargetCurvature - previous);
-      this.prevBevTargetCurvature = targetCurvature;
+        previous +
+        alpha *
+          (rawTargetCurvature - previous);
+
+      this.prevBevTargetCurvature =
+        targetCurvature;
 
       const lateralMetric = this.evalCurve(fit, 0);
       const lateralLane = lateralMetric / Math.max(0.001, xScale);
@@ -1169,15 +1247,26 @@
         xScale,
         lateralLane,
         localHeadingDeg,
+        desiredTangentDeg,
+        previewHeadingDeltaDeg,
+        previewHeadingCurvature,
         provisionalCurvature,
         geometryCurvature,
-        purePursuitCurvature: ppCurvature,
+        purePursuitCurvature,
         rawTargetCurvature,
         targetCurvature,
         severity,
         lookaheadU,
         adaptiveImageT,
-        adaptiveImageX
+        adaptiveImageX,
+
+        // Tangent in IMAGE coordinates at the adaptive point.
+        // Used only for drawing the short yellow desired-camera guide.
+        desiredImageTangentDeg:
+          Math.atan2(
+            -this.curveDerivative(centerCurve, adaptiveImageT),
+            Math.max(1, width)
+          ) * 180 / Math.PI
       };
     }
 
@@ -1882,11 +1971,27 @@
         1
       );
 
+      const pathCurvatureForDirection =
+        Number(bevGeometry?.targetCurvature);
+
+      const desiredTangentForDirection =
+        Number(bevGeometry?.desiredTangentDeg);
+
       const blueCurveDirection =
-        Number.isFinite(headingErrorDeg) && Math.abs(headingErrorDeg) >= 0.5
-          ? (headingErrorDeg < 0 ? "LEFT" : "RIGHT")
-          : Number.isFinite(lookAheadCenter) && Number.isFinite(laneCenter)
-            ? (lookAheadCenter < laneCenter ? "LEFT" : lookAheadCenter > laneCenter ? "RIGHT" : "STRAIGHT")
+        Number.isFinite(pathCurvatureForDirection) &&
+        Math.abs(pathCurvatureForDirection) >= 0.025
+          ? (
+              pathCurvatureForDirection < 0
+                ? "LEFT"
+                : "RIGHT"
+            )
+          : Number.isFinite(desiredTangentForDirection) &&
+            Math.abs(desiredTangentForDirection) >= 1.0
+            ? (
+                desiredTangentForDirection < 0
+                  ? "LEFT"
+                  : "RIGHT"
+              )
             : "STRAIGHT";
 
       const minConfidence = this.clamp(
@@ -2054,7 +2159,14 @@
 
         // Virtual bird's-eye / adaptive look-ahead output.
         bevLateralLane: bevGeometry?.lateralLane ?? null,
-        bevHeadingDeg: bevGeometry?.localHeadingDeg ?? null,
+
+        // Controller heading = desired tangent at adaptive look-ahead.
+        // Near tangent is kept only for diagnostics.
+        bevHeadingDeg: bevGeometry?.desiredTangentDeg ?? null,
+        bevNearHeadingDeg: bevGeometry?.localHeadingDeg ?? null,
+        bevDesiredTangentDeg: bevGeometry?.desiredTangentDeg ?? null,
+        bevPreviewHeadingDeltaDeg: bevGeometry?.previewHeadingDeltaDeg ?? null,
+
         bevGeometryCurvature: bevGeometry?.geometryCurvature ?? null,
         bevPurePursuitCurvature: bevGeometry?.purePursuitCurvature ?? null,
         rawTargetCurvature: bevGeometry?.rawTargetCurvature ?? null,
@@ -2063,6 +2175,7 @@
         adaptiveLookaheadU: bevGeometry?.lookaheadU ?? null,
         adaptiveLookaheadT: bevGeometry?.adaptiveImageT ?? null,
         adaptiveLookaheadCenter: bevGeometry?.adaptiveImageX ?? null,
+        desiredImageTangentDeg: bevGeometry?.desiredImageTangentDeg ?? null,
 
         rawThresholds: binary.rawThresholds,
         thresholds: binary.thresholds,
@@ -2210,55 +2323,144 @@
       );
 
       // ---------------------------------------------------
-      // SHORT YELLOW CAMERA-HEADING GUIDE
+      // CAMERA AXIS + YELLOW DESIRED TANGENT
       // ---------------------------------------------------
-      // Đường vàng là hướng thật của camera/robot trong ảnh:
-      // một đoạn thẳng đứng rất ngắn tại tâm camera.
-      // Nó KHÔNG bị ép lên đường xanh.
+      // IMPORTANT:
+      // - Gray dashed vertical = camera/robot CURRENT optical axis.
+      // - Yellow = camera heading TARGET, forced to be tangent to the
+      //   BLUE centerCurve at the adaptive control point.
       //
-      // Nếu vàng và xanh tách nhau:
-      // - lệch ngang => lateral error
-      // - khác hướng => heading error
+      // The yellow line therefore never represents a second trajectory.
+      // It is only a short tangent/heading vector.
       if (
         Number.isFinite(lane.frameCenter) &&
         Number.isFinite(lane.nearY) &&
         Number.isFinite(lane.roiHeight)
       ) {
         const guideRatio = this.clamp(
-          Number(this.config.VISION_CAMERA_HEADING_LENGTH_RATIO) || 0.06,
+          Number(this.config.VISION_CAMERA_HEADING_LENGTH_RATIO) || 0.075,
           0.025,
           0.16
         );
+
         const guideLength = Math.max(
-          8,
+          10,
           lane.roiHeight * guideRatio
         );
-        const guideBottomY = lane.nearY;
-        const guideTopY = Math.max(
-          lane.roiTop,
-          guideBottomY - guideLength
-        );
 
+        // Actual camera axis: thin gray dashed reference.
         ctx.save();
-        ctx.strokeStyle = "#fdb022";
-        ctx.lineWidth = 4;
-        ctx.lineCap = "round";
+        ctx.strokeStyle = "#98a2b3";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
         ctx.beginPath();
-        ctx.moveTo(lane.frameCenter, guideBottomY);
-        ctx.lineTo(lane.frameCenter, guideTopY);
-        ctx.stroke();
-
-        ctx.fillStyle = "#fdb022";
-        ctx.beginPath();
-        ctx.arc(
+        ctx.moveTo(
           lane.frameCenter,
-          guideBottomY,
-          4,
-          0,
-          Math.PI * 2
+          lane.nearY
         );
-        ctx.fill();
+        ctx.lineTo(
+          lane.frameCenter,
+          Math.max(
+            lane.roiTop,
+            lane.nearY - guideLength
+          )
+        );
+        ctx.stroke();
         ctx.restore();
+
+        // Desired camera heading: yellow tangent at adaptive point.
+        const tangentX =
+          Number.isFinite(lane.adaptiveLookaheadCenter)
+            ? lane.adaptiveLookaheadCenter
+            : lane.laneCenter;
+
+        const tangentT =
+          Number.isFinite(lane.adaptiveLookaheadT)
+            ? lane.adaptiveLookaheadT
+            : lane.nearT;
+
+        const tangentY =
+          lane.roiTop +
+          tangentT * lane.roiHeight;
+
+        if (
+          Number.isFinite(tangentX) &&
+          Number.isFinite(tangentY) &&
+          lane.centerCurve
+        ) {
+          // Use the BLUE image-space polynomial itself, so yellow is
+          // exactly tangent to blue at the selected point.
+          const dxdt =
+            this.curveDerivative(
+              lane.centerCurve,
+              tangentT
+            );
+
+          // Forward along the lane means t decreases.
+          const halfDt =
+            Math.max(
+              0.012,
+              guideRatio * 0.40
+            );
+
+          const tForward =
+            this.clamp(
+              tangentT - halfDt,
+              0,
+              1
+            );
+
+          const tBack =
+            this.clamp(
+              tangentT + halfDt,
+              0,
+              1
+            );
+
+          // Linear tangent, not another fitted curve.
+          const xForward =
+            tangentX +
+            dxdt * (tForward - tangentT);
+
+          const xBack =
+            tangentX +
+            dxdt * (tBack - tangentT);
+
+          const yForward =
+            lane.roiTop +
+            tForward * lane.roiHeight;
+
+          const yBack =
+            lane.roiTop +
+            tBack * lane.roiHeight;
+
+          ctx.save();
+          ctx.strokeStyle = "#fdb022";
+          ctx.lineWidth = 4;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(
+            xBack,
+            yBack
+          );
+          ctx.lineTo(
+            xForward,
+            yForward
+          );
+          ctx.stroke();
+
+          ctx.fillStyle = "#fdb022";
+          ctx.beginPath();
+          ctx.arc(
+            tangentX,
+            tangentY,
+            4,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+          ctx.restore();
+        }
       }
 
       // Điểm near + lookahead dùng thật cho controller.
@@ -2319,9 +2521,9 @@
         `Otsu T: ${thresholds || "-"} · dark ${(lane.darkRatio * 100).toFixed(1)}%`,
         `Conf: ${(lane.laneConfidence * 100).toFixed(0)}% · width ${lane.laneWidth != null ? lane.laneWidth.toFixed(0) : "-"}px`,
         `Lateral: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px`,
-        `Yellow camera: 0.0° · Blue tangent ${lane.localHeadingErrorDeg != null ? lane.localHeadingErrorDeg.toFixed(1) : "-"}°`,
-        `Control heading: ${lane.controlHeadingErrorDeg != null ? lane.controlHeadingErrorDeg.toFixed(1) : "-"}° · curve ${lane.curvatureDeg != null ? lane.curvatureDeg.toFixed(1) : "-"}°`,
-        `BEV κ: ${lane.targetCurvature != null ? lane.targetCurvature.toFixed(2) : "-"} · look ${lane.adaptiveLookaheadU != null ? lane.adaptiveLookaheadU.toFixed(2) : "-"}`,
+        `Camera axis: 0.0° · Yellow target ${lane.bevDesiredTangentDeg != null ? lane.bevDesiredTangentDeg.toFixed(1) : "-"}°`,
+        `Near tangent: ${lane.bevNearHeadingDeg != null ? lane.bevNearHeadingDeg.toFixed(1) : "-"}° · preview Δ ${lane.bevPreviewHeadingDeltaDeg != null ? lane.bevPreviewHeadingDeltaDeg.toFixed(1) : "-"}°`,
+        `Path κ: ${lane.targetCurvature != null ? lane.targetCurvature.toFixed(2) : "-"} · PP(debug) ${lane.bevPurePursuitCurvature != null ? lane.bevPurePursuitCurvature.toFixed(2) : "-"} · look ${lane.adaptiveLookaheadU != null ? lane.adaptiveLookaheadU.toFixed(2) : "-"}`,
         `Blue curve: ${lane.blueCurveDirection || "-"} · ${lane.blueCurveSeverity != null ? (lane.blueCurveSeverity * 100).toFixed(0) : "-"}%`
       ];
 
@@ -2550,7 +2752,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-09-27-web-bev-curvature-v1";
+  window.ROBOT_VISION_BUILD = "2026-09-27-web-bev-curvature-v2-tangent-intent";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();
