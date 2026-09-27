@@ -242,6 +242,9 @@
           <div><span>Steering soft</span><b id="visionGeometrySteeringState">0.00</b></div>
           <div><span>Base logical</span><b id="visionGeometryBaseState">0</b></div>
           <div><span>Delta logical</span><b id="visionGeometryDeltaState">0</b></div>
+          <div><span>Target curvature κ</span><b id="visionTargetCurvatureState">0</b></div>
+          <div><span>Turn ratio</span><b id="visionTurnRatioState">0</b></div>
+          <div><span>Adaptive look-ahead</span><b id="visionAdaptiveLookaheadState">0</b></div>
 
           <div><span>QR</span><b id="visionQrState">-</b></div>
           <div><span>QR diện tích</span><b id="visionQrAreaState">-</b></div>
@@ -253,7 +256,7 @@
           <div><span>Firmware ESP32</span><b id="visionFirmwareBuildState">chưa nhận</b></div>
           <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
           <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
-          <div><span>Source build</span>P26-09-27 · Precision V2 · Lane Geometry Soft Control · 4-Motor</b></div>
+          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · Web BEV Curvature V1 · Camera Only · 4-Motor</b></div>
           <div><span>Config / Vision / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
@@ -441,6 +444,18 @@
             <b id="geometryDeltaState">0</b>
           </div>
           <div>
+            <span>Target curvature κ</span>
+            <b id="targetCurvatureState">0</b>
+          </div>
+          <div>
+            <span>Turn ratio</span>
+            <b id="turnRatioState">0</b>
+          </div>
+          <div>
+            <span>Adaptive look-ahead</span>
+            <b id="adaptiveLookaheadState">0</b>
+          </div>
+          <div>
             <span>Lý do motor</span>
             <b id="motorReasonState">WAITING_TASK</b>
           </div>
@@ -450,7 +465,7 @@
           </div>
           <div>
             <span>Source build</span>
-            P26-09-27 · Precision V2 · Lane Geometry Soft Control · 4-Motor</b>
+            <b id="sourceBuildState">2026-09-27 · Web BEV Curvature V1 · Camera Only · 4-Motor</b>
           </div>
           <div>
             <span>Config / Vision / Navigation</span>
@@ -668,20 +683,20 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20260927-lane-geometry-v1"></script>
+<script src="config.js?v=20260927-web-bev-curvature-v1"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
-<script src="audio.js?v=20260927-lane-geometry-v1"></script>
-<script src="gemini-live.js?v=20260927-lane-geometry-v1"></script>
-<script src="mqtt-robot.js?v=20260927-lane-geometry-v1"></script>
-<script src="orientation.js?v=20260927-lane-geometry-v1"></script>
-<script src="vision.js?v=20260927-lane-geometry-v1"></script>
-<script src="navigation.js?v=20260927-lane-geometry-v1"></script>
-<script src="app.js?v=20260927-lane-geometry-v1"></script>
-<script src="robot-control.js?v=20260927-lane-geometry-v1"></script>
+<script src="audio.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="gemini-live.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="mqtt-robot.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="orientation.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="vision.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="navigation.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="app.js?v=20260927-web-bev-curvature-v1"></script>
+<script src="robot-control.js?v=20260927-web-bev-curvature-v1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL

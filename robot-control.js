@@ -335,11 +335,13 @@
       );
 
       const controlHeading =
-        frame?.controlHeadingErrorDeg != null
-          ? Number(frame.controlHeadingErrorDeg)
-          : frame?.headingErrorDeg != null
-            ? Number(frame.headingErrorDeg)
-            : null;
+        frame?.bevHeadingDeg != null
+          ? Number(frame.bevHeadingDeg)
+          : frame?.controlHeadingErrorDeg != null
+            ? Number(frame.controlHeadingErrorDeg)
+            : frame?.headingErrorDeg != null
+              ? Number(frame.headingErrorDeg)
+              : null;
 
       setText(
         "visionHeadingState",
@@ -350,8 +352,8 @@
 
       setText(
         "visionCurvatureState",
-        frame?.curvatureDeg != null
-          ? `${frame.curvatureDeg >= 0 ? "+" : ""}${frame.curvatureDeg.toFixed(1)}°`
+        frame?.targetCurvature != null
+          ? `${frame.targetCurvature >= 0 ? "+" : ""}${frame.targetCurvature.toFixed(3)} κ`
           : "-"
       );
 
@@ -364,8 +366,8 @@
 
       setText(
         "visionTargetState",
-        frame?.lookAheadCenter != null
-          ? `x=${frame.lookAheadCenter.toFixed(1)}`
+        frame?.adaptiveLookaheadCenter != null
+          ? `x=${frame.adaptiveLookaheadCenter.toFixed(1)} · u=${Number(frame.adaptiveLookaheadU || 0).toFixed(2)}`
           : "-"
       );
     },

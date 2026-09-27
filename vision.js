@@ -68,6 +68,10 @@
       this.unobservedFrames = 0;
       this.lostFrames = 0;
 
+      // Virtual bird's-eye temporal state.
+      this.prevBevTargetCurvature = 0;
+      this.prevBevLookaheadU = null;
+
       if (
         "BarcodeDetector" in window &&
         typeof window.BarcodeDetector === "function"
@@ -279,6 +283,8 @@
       this.oneLineFrames = 0;
       this.unobservedFrames = 0;
       this.lostFrames = 0;
+      this.prevBevTargetCurvature = 0;
+      this.prevBevLookaheadU = null;
       this.lastFrame = null;
     }
 
@@ -977,6 +983,204 @@
       return 2 * curve.a * t + curve.b;
     }
 
+
+    buildVirtualBevGeometry({
+      centerCurve,
+      leftCurve,
+      rightCurve,
+      width,
+      nearT
+    }) {
+      if (
+        this.config.VISION_BEV_ENABLE === false ||
+        !centerCurve || !leftCurve || !rightCurve
+      ) {
+        return null;
+      }
+
+      const farT = this.clamp(
+        Number(this.config.VISION_BEV_FAR_T_RATIO) || 0.18,
+        0.06,
+        nearT - 0.22
+      );
+
+      const samples = Math.max(
+        7,
+        Math.round(Number(this.config.VISION_BEV_SAMPLES) || 11)
+      );
+
+      const xScale = this.clamp(
+        Number(this.config.VISION_BEV_X_SCALE) || 0.55,
+        0.20,
+        1.20
+      );
+
+      const frameCenter = width / 2;
+      const points = [];
+
+      for (let i = 0; i < samples; i++) {
+        const u = i / (samples - 1);
+        const t = nearT - u * (nearT - farT);
+
+        const leftX = this.evalCurve(leftCurve, t);
+        const rightX = this.evalCurve(rightCurve, t);
+        const centerX = this.evalCurve(centerCurve, t);
+        const laneWidth = rightX - leftX;
+
+        if (
+          !Number.isFinite(leftX) ||
+          !Number.isFinite(rightX) ||
+          !Number.isFinite(centerX) ||
+          !Number.isFinite(laneWidth) ||
+          laneWidth < width * 0.06
+        ) {
+          continue;
+        }
+
+        // Perspective-normalized lateral coordinate.
+        // xLane=1 means one full observed lane-width to the right.
+        const xLane = (centerX - frameCenter) / laneWidth;
+        const xMetric = xLane * xScale;
+
+        points.push({ t: u, x: xMetric, xLane, imageT: t, imageX: centerX });
+      }
+
+      if (points.length < 5) {
+        return null;
+      }
+
+      const fit = this.fitCurve(points);
+      if (!fit) {
+        return null;
+      }
+
+      const localProbeU = 0.08;
+      const localDerivative = this.curveDerivative(fit, localProbeU);
+      const localHeadingDeg = Math.atan(localDerivative) * 180 / Math.PI;
+
+      const secondDerivative = 2 * fit.a;
+      const provisionalCurvature =
+        secondDerivative /
+        Math.pow(1 + localDerivative * localDerivative, 1.5);
+
+      const curvatureFull = Math.max(
+        0.25,
+        Number(this.config.VISION_BEV_CURVATURE_FULL) || 1.35
+      );
+      const headingFull = Math.max(
+        5,
+        Number(this.config.VISION_BEV_HEADING_FULL_DEG) || 18
+      );
+
+      const severity = this.clamp(
+        Math.max(
+          Math.abs(provisionalCurvature) / curvatureFull,
+          Math.abs(localHeadingDeg) / headingFull
+        ),
+        0,
+        1
+      );
+
+      const nearLookaheadU = this.clamp(
+        Number(this.config.VISION_BEV_LOOKAHEAD_NEAR_U) || 0.26,
+        0.12,
+        0.55
+      );
+      const farLookaheadU = this.clamp(
+        Number(this.config.VISION_BEV_LOOKAHEAD_FAR_U) || 0.70,
+        nearLookaheadU + 0.10,
+        0.90
+      );
+
+      const rawLookaheadU =
+        farLookaheadU - severity * (farLookaheadU - nearLookaheadU);
+
+      const lookaheadAlpha = this.clamp(
+        Number(this.config.VISION_BEV_LOOKAHEAD_EMA_ALPHA) || 0.38,
+        0.05,
+        1
+      );
+
+      const lookaheadU = Number.isFinite(this.prevBevLookaheadU)
+        ? this.prevBevLookaheadU +
+          lookaheadAlpha * (rawLookaheadU - this.prevBevLookaheadU)
+        : rawLookaheadU;
+
+      this.prevBevLookaheadU = lookaheadU;
+
+      const targetX = this.evalCurve(fit, lookaheadU);
+      const lookaheadSq = Math.max(0.02, lookaheadU * lookaheadU);
+      const ppCurvature =
+        2 * targetX / Math.max(0.025, targetX * targetX + lookaheadSq);
+
+      const derivativeAtTarget = this.curveDerivative(fit, lookaheadU);
+      const geometryCurvature =
+        secondDerivative /
+        Math.pow(1 + derivativeAtTarget * derivativeAtTarget, 1.5);
+
+      const ppWeight = this.clamp(
+        Number(this.config.VISION_BEV_PURE_PURSUIT_WEIGHT) || 0.65,
+        0,
+        1
+      );
+      const geoWeight = this.clamp(
+        Number(this.config.VISION_BEV_GEOMETRY_WEIGHT) || 0.35,
+        0,
+        1
+      );
+      const weightSum = Math.max(0.001, ppWeight + geoWeight);
+
+      const rawTargetCurvature =
+        (ppCurvature * ppWeight + geometryCurvature * geoWeight) / weightSum;
+
+      const riseAlpha = this.clamp(
+        Number(this.config.VISION_BEV_CURVATURE_RISE_ALPHA) || 0.52,
+        0.05,
+        1
+      );
+      const fallAlpha = this.clamp(
+        Number(this.config.VISION_BEV_CURVATURE_FALL_ALPHA) || 0.24,
+        0.03,
+        1
+      );
+
+      const previous = Number(this.prevBevTargetCurvature) || 0;
+      const sameDirection = rawTargetCurvature * previous >= 0;
+      const isFalling =
+        sameDirection &&
+        Math.abs(rawTargetCurvature) < Math.abs(previous);
+      const alpha = isFalling ? fallAlpha : riseAlpha;
+
+      const targetCurvature =
+        previous + alpha * (rawTargetCurvature - previous);
+      this.prevBevTargetCurvature = targetCurvature;
+
+      const lateralMetric = this.evalCurve(fit, 0);
+      const lateralLane = lateralMetric / Math.max(0.001, xScale);
+
+      // Convert adaptive u back to image t only for overlay/debug.
+      const adaptiveImageT = nearT - lookaheadU * (nearT - farT);
+      const adaptiveImageX = this.evalCurve(centerCurve, adaptiveImageT);
+
+      return {
+        curve: fit,
+        points,
+        farT,
+        xScale,
+        lateralLane,
+        localHeadingDeg,
+        provisionalCurvature,
+        geometryCurvature,
+        purePursuitCurvature: ppCurvature,
+        rawTargetCurvature,
+        targetCurvature,
+        severity,
+        lookaheadU,
+        adaptiveImageT,
+        adaptiveImageX
+      };
+    }
+
     smoothCurve(raw, previous, alpha) {
       if (!raw) {
         return previous ? { ...previous } : null;
@@ -1631,6 +1835,18 @@
       }
 
       // =====================================================
+      // VIRTUAL BIRD'S-EYE GEOMETRY
+      // =====================================================
+      // Use all sampled centerline geometry in lane-width-normalized space.
+      const bevGeometry = this.buildVirtualBevGeometry({
+        centerCurve,
+        leftCurve,
+        rightCurve,
+        width,
+        nearT
+      });
+
+      // =====================================================
       // BLUE CURVE SEVERITY
       // =====================================================
       // Chỉ dùng hình học của centerCurve màu xanh dương.
@@ -1835,6 +2051,18 @@
         nearY,
         lookAheadY,
         localHeadingY,
+
+        // Virtual bird's-eye / adaptive look-ahead output.
+        bevLateralLane: bevGeometry?.lateralLane ?? null,
+        bevHeadingDeg: bevGeometry?.localHeadingDeg ?? null,
+        bevGeometryCurvature: bevGeometry?.geometryCurvature ?? null,
+        bevPurePursuitCurvature: bevGeometry?.purePursuitCurvature ?? null,
+        rawTargetCurvature: bevGeometry?.rawTargetCurvature ?? null,
+        targetCurvature: bevGeometry?.targetCurvature ?? null,
+        bevSeverity: bevGeometry?.severity ?? null,
+        adaptiveLookaheadU: bevGeometry?.lookaheadU ?? null,
+        adaptiveLookaheadT: bevGeometry?.adaptiveImageT ?? null,
+        adaptiveLookaheadCenter: bevGeometry?.adaptiveImageX ?? null,
 
         rawThresholds: binary.rawThresholds,
         thresholds: binary.thresholds,
@@ -2041,19 +2269,23 @@
         ctx.fill();
       }
 
-      if (Number.isFinite(lane.lookAheadCenter)) {
-        // Look-ahead chỉ là điểm sample trên cùng quỹ đạo xanh,
-        // không vẽ thêm một đường điều khiển màu khác.
-        ctx.fillStyle = "#53b1fd";
+      const adaptiveTargetX = Number.isFinite(lane.adaptiveLookaheadCenter)
+        ? lane.adaptiveLookaheadCenter
+        : lane.lookAheadCenter;
+      const adaptiveTargetY = Number.isFinite(lane.adaptiveLookaheadT)
+        ? lane.roiTop + lane.adaptiveLookaheadT * lane.roiHeight
+        : lane.lookAheadY;
+
+      if (Number.isFinite(adaptiveTargetX) && Number.isFinite(adaptiveTargetY)) {
+        // Adaptive look-ahead point is still ON the same blue centerCurve.
+        // White ring makes it visible without inventing a second trajectory.
+        ctx.save();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(
-          lane.lookAheadCenter,
-          lane.lookAheadY,
-          6,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
+        ctx.arc(adaptiveTargetX, adaptiveTargetY, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
       }
 
       // QR gần nhất.
@@ -2089,6 +2321,7 @@
         `Lateral: ${lane.lineError != null ? lane.lineError.toFixed(1) : "-"}px`,
         `Yellow camera: 0.0° · Blue tangent ${lane.localHeadingErrorDeg != null ? lane.localHeadingErrorDeg.toFixed(1) : "-"}°`,
         `Control heading: ${lane.controlHeadingErrorDeg != null ? lane.controlHeadingErrorDeg.toFixed(1) : "-"}° · curve ${lane.curvatureDeg != null ? lane.curvatureDeg.toFixed(1) : "-"}°`,
+        `BEV κ: ${lane.targetCurvature != null ? lane.targetCurvature.toFixed(2) : "-"} · look ${lane.adaptiveLookaheadU != null ? lane.adaptiveLookaheadU.toFixed(2) : "-"}`,
         `Blue curve: ${lane.blueCurveDirection || "-"} · ${lane.blueCurveSeverity != null ? (lane.blueCurveSeverity * 100).toFixed(0) : "-"}%`
       ];
 
@@ -2317,7 +2550,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-lane-geometry-v1";
+  window.ROBOT_VISION_BUILD = "2026-09-27-web-bev-curvature-v1";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

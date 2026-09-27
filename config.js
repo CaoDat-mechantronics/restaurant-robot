@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-lane-geometry-v1";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-lane-geometry-v1";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Lane Geometry Soft Control · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-web-bev-curvature-v1";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-web-bev-curvature-v1";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Web BEV Curvature V1 · Camera Only · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -99,11 +99,11 @@ window.APP_CONFIG = {
     VISION_ONE_LINE_MAX_FRAMES: 45,
 
     // Nếu mất cả hai vạch, giữ quỹ đạo cũ tối đa vài frame để tránh giật.
-    VISION_LOST_PREDICT_FRAMES: 2,
+    VISION_LOST_PREDICT_FRAMES: 1,
     VISION_LOST_PREDICT_CONFIDENCE: 0.56,
 
     // Tâm điều khiển được lọc riêng để xe không giật trái/phải liên tục.
-    VISION_CENTER_EMA_ALPHA: 0.34,
+    VISION_CENTER_EMA_ALPHA: 0.42,
     VISION_MAX_CENTER_JUMP_PX: 26,
 
     // Điểm gần dùng để đo lệch ngang và điểm nhìn trước dùng để bắt cua sớm.
@@ -120,6 +120,37 @@ window.APP_CONFIG = {
 
     // Đường vàng là HƯỚNG CAMERA thật: đoạn thẳng đứng, rất ngắn tại tâm camera.
     VISION_CAMERA_HEADING_LENGTH_RATIO: 0.06,
+
+    // ===================================================
+    // VIRTUAL BIRD'S-EYE / LANE-NORMALIZED GEOMETRY
+    // ===================================================
+    // Không cần calibration homography cứng ở bước đầu. Thay vào đó mỗi điểm
+    // centerCurve được chuẩn hoá theo lane width tại chính hàng ảnh đó.
+    // Nhờ vậy hình học xa/gần ít bị phối cảnh làm sai hơn.
+    VISION_BEV_ENABLE: true,
+    VISION_BEV_FAR_T_RATIO: 0.18,
+    VISION_BEV_SAMPLES: 11,
+
+    // Quy đổi lane-width sang một hệ tọa độ forward/lateral tương đối.
+    // Đây là hệ số scale hình học, KHÔNG phải PWM.
+    VISION_BEV_X_SCALE: 0.55,
+
+    // Adaptive look-ahead: đường thẳng nhìn xa, cua gắt nhìn gần.
+    // u=0 ở gần robot, u=1 ở xa.
+    VISION_BEV_LOOKAHEAD_NEAR_U: 0.26,
+    VISION_BEV_LOOKAHEAD_FAR_U: 0.70,
+    VISION_BEV_CURVATURE_FULL: 1.35,
+    VISION_BEV_HEADING_FULL_DEG: 18,
+    VISION_BEV_LOOKAHEAD_EMA_ALPHA: 0.38,
+
+    // Pure-pursuit + curvature của polynomial.
+    VISION_BEV_PURE_PURSUIT_WEIGHT: 0.65,
+    VISION_BEV_GEOMETRY_WEIGHT: 0.35,
+
+    // Curvature tăng nhanh khi vào cua nhưng giảm chậm hơn một chút để tránh
+    // 1 frame nhận sai làm robot đột ngột đi thẳng giữa cua.
+    VISION_BEV_CURVATURE_RISE_ALPHA: 0.52,
+    VISION_BEV_CURVATURE_FALL_ALPHA: 0.24,
 
     // Confidence thấp thì navigation giảm tốc hoặc dừng.
     VISION_MIN_CONFIDENCE: 0.38,
@@ -265,12 +296,41 @@ window.APP_CONFIG = {
     LANE_DIRECTION_LOCK_MIN_DELTA_LOGICAL: 8,
     LANE_DIRECTION_OVERRIDE_LATERAL: 0.88,
 
+    // ===================================================
+    // CURVATURE DIFFERENTIAL DRIVE - CAMERA ONLY
+    // ===================================================
+    // targetCurvature được sinh bởi virtual BEV + adaptive look-ahead.
+    // Controller không hard-code cặp PWM và không dùng gyro khi LINE_FOLLOW.
+    CURVATURE_CONTROL_ENABLE: true,
+    CURVATURE_TARGET_FULL: 1.80,
+    CURVATURE_LATERAL_FULL: 0.34,
+    CURVATURE_HEADING_FULL_DEG: 18,
+    CURVATURE_HEADING_D_FULL_DEG_S: 120,
+
+    CURVATURE_WEIGHT_TARGET: 1.30,
+    CURVATURE_WEIGHT_LATERAL: 0.68,
+    CURVATURE_WEIGHT_HEADING: 0.62,
+    CURVATURE_WEIGHT_HEADING_D: 0.10,
+    CURVATURE_SOFT_SCALE: 1.05,
+
+    // turnRatio=0 -> hai bên bằng nhau; |turnRatio| tăng liên tục theo sai số.
+    // Không phải gap PWM cố định.
+    CURVATURE_MAX_TURN_RATIO: 0.82,
+
+    // Cua càng gắt thì tốc độ trung bình càng giảm trước khi tăng chênh hai bên.
+    CURVATURE_SPEED_SLOWDOWN_GAIN: 0.72,
+    CURVATURE_SPEED_SLOWDOWN_EXPONENT: 0.82,
+    CURVATURE_OFFCENTER_SLOWDOWN_GAIN: 0.28,
+
+    // Không dùng IR2/IR3 để điều khiển trong bản test web-only này.
+    USE_IR_BOUNDARY_OVERRIDE: false,
+
     // Gyro KHÔNG điều khiển LINE_FOLLOW.
     // Gyro vẫn được giữ nguyên cho TURNING QR ~90°.
     ADAPTIVE_YAW_FEEDBACK_ENABLE: false,
 
     // Không sử dụng frame camera quá cũ để tiếp tục lái.
-    VISION_MAX_FRAME_AGE_MS: 160,
+    VISION_MAX_FRAME_AGE_MS: 120,
 
     // Cảm biến IR của bạn là active-low:
     // true  = nền đường / có tín hiệu
