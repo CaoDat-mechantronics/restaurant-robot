@@ -2210,7 +2210,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-bluecurve-v2";
+  window.ROBOT_VISION_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();

@@ -1333,7 +1333,7 @@
       );
 
       const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 165,
+        Number(this.config.MOTOR_MAX_PWM) || 185,
         cruisePwm,
         255
       );
@@ -1503,50 +1503,179 @@
         return mapped;
       }
 
-      const desiredGap = Math.max(0, Math.round(this.blueCurveTargetGap || 0));
-      if (desiredGap <= 0) return mapped;
+      const desiredGap = Math.max(
+        0,
+        Math.round(this.blueCurveTargetGap || 0)
+      );
 
       const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 165,
+        Number(this.config.MOTOR_MAX_PWM) || 185,
         1,
         255
       );
+
       const torqueFloor = this.clamp(
         Number(this.config.LINE_FOLLOW_TORQUE_FLOOR_PWM) || 70,
         1,
         maxPwm
       );
 
+      const cruisePwm = this.clamp(
+        Number(this.config.MOTOR_CRUISE_PWM) || 98,
+        torqueFloor,
+        maxPwm
+      );
+
       let left = Math.round(mapped.left);
       let right = Math.round(mapped.right);
 
-      if (this.blueCurveDirection === "LEFT") {
-        // Cua trái: bánh phải là bánh ngoài và phải nhanh hơn bánh trái.
-        left = Math.max(left, torqueFloor);
-        const currentGap = right - left;
-        if (currentGap < desiredGap) {
-          right = Math.min(maxPwm, left + desiredGap);
-          // Nếu bánh ngoài đã chạm max, hạ bánh trong nhưng không dưới torque floor.
-          if (right - left < desiredGap) {
-            left = Math.max(torqueFloor, right - desiredGap);
-          }
+      // ===================================================
+      // DIRECT BLUE-CURVE SPEED PROFILE
+      // ===================================================
+      // Đường xanh là nguồn quyết định hướng cua.
+      // Cua càng gắt:
+      //   - bánh trong giảm dần về torque floor
+      //   - bánh ngoài tăng dần về outer max
+      //
+      // Không reverse trong LINE_FOLLOW.
+      // TURNING 90° vẫn dùng logic -PWM/+PWM riêng.
+      const directEnabled =
+        this.config.BLUE_CURVE_DIRECT_SPEED_ENABLE !== false;
+
+      const activate = this.clamp(
+        Number(this.config.BLUE_CURVE_DIRECT_ACTIVATE_SEVERITY) || 0.15,
+        0,
+        0.95
+      );
+
+      const directExponent = Math.max(
+        0.4,
+        Number(this.config.BLUE_CURVE_DIRECT_EXPONENT) || 0.90
+      );
+
+      const innerAtFull = this.clamp(
+        Number(this.config.BLUE_CURVE_INNER_PWM_AT_FULL_CURVE) || torqueFloor,
+        torqueFloor,
+        cruisePwm
+      );
+
+      const outerAtFull = this.clamp(
+        Number(this.config.BLUE_CURVE_OUTER_PWM_AT_FULL_CURVE) || maxPwm,
+        cruisePwm,
+        maxPwm
+      );
+
+      let curveStrength = 0;
+
+      if (
+        directEnabled &&
+        this.blueCurveDirection !== "STRAIGHT" &&
+        this.blueCurveSeverity > activate
+      ) {
+        const normalized = this.clamp(
+          (this.blueCurveSeverity - activate) /
+            Math.max(0.001, 1 - activate),
+          0,
+          1
+        );
+
+        curveStrength = Math.pow(
+          normalized,
+          directExponent
+        );
+      }
+
+      if (curveStrength > 0) {
+        const innerTarget = Math.round(
+          cruisePwm -
+          curveStrength * (cruisePwm - innerAtFull)
+        );
+
+        const outerTarget = Math.round(
+          cruisePwm +
+          curveStrength * (outerAtFull - cruisePwm)
+        );
+
+        if (this.blueCurveDirection === "LEFT") {
+          // Cua trái:
+          // LEFT  = bánh trong  -> giảm
+          // RIGHT = bánh ngoài -> tăng
+          left = Math.max(
+            torqueFloor,
+            Math.min(left, innerTarget)
+          );
+
+          right = Math.min(
+            maxPwm,
+            Math.max(right, outerTarget)
+          );
+        }
+        else if (this.blueCurveDirection === "RIGHT") {
+          // Cua phải:
+          // RIGHT = bánh trong  -> giảm
+          // LEFT  = bánh ngoài -> tăng
+          right = Math.max(
+            torqueFloor,
+            Math.min(right, innerTarget)
+          );
+
+          left = Math.min(
+            maxPwm,
+            Math.max(left, outerTarget)
+          );
         }
       }
-      else if (this.blueCurveDirection === "RIGHT") {
-        // Cua phải: bánh trái là bánh ngoài.
-        right = Math.max(right, torqueFloor);
-        const currentGap = left - right;
-        if (currentGap < desiredGap) {
-          left = Math.min(maxPwm, right + desiredGap);
+
+      // ===================================================
+      // MINIMUM GAP SAFETY
+      // ===================================================
+      // Sau direct profile, vẫn đảm bảo chênh PWM ít nhất bằng
+      // blueCurveTargetGap. Nếu bánh ngoài chạm max, hạ bánh trong
+      // nhưng không thấp hơn torque floor.
+      if (desiredGap > 0) {
+        if (this.blueCurveDirection === "LEFT") {
+          left = Math.max(left, torqueFloor);
+
+          if (right - left < desiredGap) {
+            right = Math.min(
+              maxPwm,
+              left + desiredGap
+            );
+
+            if (right - left < desiredGap) {
+              left = Math.max(
+                torqueFloor,
+                right - desiredGap
+              );
+            }
+          }
+        }
+        else if (this.blueCurveDirection === "RIGHT") {
+          right = Math.max(right, torqueFloor);
+
           if (left - right < desiredGap) {
-            right = Math.max(torqueFloor, left - desiredGap);
+            left = Math.min(
+              maxPwm,
+              right + desiredGap
+            );
+
+            if (left - right < desiredGap) {
+              right = Math.max(
+                torqueFloor,
+                left - desiredGap
+              );
+            }
           }
         }
       }
 
       return {
-        left: Math.round(this.clamp(left, 0, maxPwm)),
-        right: Math.round(this.clamp(right, 0, maxPwm))
+        left: Math.round(
+          this.clamp(left, 0, maxPwm)
+        ),
+        right: Math.round(
+          this.clamp(right, 0, maxPwm)
+        )
       };
     }
 
@@ -1589,7 +1718,7 @@
     }
   }
 
-  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-bluecurve-v2";
+  window.ROBOT_NAV_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
   console.info("[RobotNavigation] loaded", window.ROBOT_NAV_BUILD);
 
   window.ROBOT_NAV_STATE = NAV_STATE;

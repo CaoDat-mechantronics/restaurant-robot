@@ -1,6 +1,6 @@
-window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-bluecurve-v2";
-window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-bluecurve-v2";
-window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Blue-Curve FF · 4-Motor";
+window.ROBOT_SOURCE_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
+window.ROBOT_CONFIG_BUILD = "2026-09-27-gear120-bluecurve-v3-strong-turn";
+window.ROBOT_SOURCE_BUILD_LABEL = "2026-09-27 · Precision V2 · Blue-Curve Strong Turn · 4-Motor";
 
 window.APP_CONFIG = {
   API_BASE_URL: "https://restaurant-api-t6pq.onrender.com",
@@ -140,7 +140,7 @@ window.APP_CONFIG = {
     MOTOR_CRUISE_PWM: 98,
     MOTOR_START_BOOST_PWM: 112,
     MOTOR_START_BOOST_MS: 0,
-    MOTOR_MAX_PWM: 165,
+    MOTOR_MAX_PWM: 185,
 
 
     // Giá trị logic cực nhỏ được coi là STOP.
@@ -225,13 +225,25 @@ window.APP_CONFIG = {
 
     // Cua vừa/gắt sẽ nội suy gap từ MIN tới MAX.
     // Với torque floor 70, cua rất gắt thường sẽ tiến tới khoảng 70/140.
-    BLUE_CURVE_GAP_MIN_PWM: 20,
-    BLUE_CURVE_GAP_MAX_PWM: 70,
-    BLUE_CURVE_GAP_EXPONENT: 1.10,
+    BLUE_CURVE_GAP_MIN_PWM: 24,
+    BLUE_CURVE_GAP_MAX_PWM: 115,
+    BLUE_CURVE_GAP_EXPONENT: 0.90,
 
     // Làm mượt gap để không giật khi severity thay đổi giữa các frame.
-    BLUE_CURVE_GAP_EMA_ALPHA: 0.42,
-    BLUE_CURVE_GAP_MAX_DELTA_PWM: 9,
+    BLUE_CURVE_GAP_EMA_ALPHA: 0.52,
+    BLUE_CURVE_GAP_MAX_DELTA_PWM: 14,
+
+    // Strong-turn profile:
+    // Ngoài việc ép PWM gap, trực tiếp kéo bánh trong xuống và bánh ngoài lên
+    // theo độ cong của chính đường xanh.
+    // severity = 100%:
+    //   LEFT  -> khoảng 70 / 185
+    //   RIGHT -> khoảng 185 / 70
+    BLUE_CURVE_DIRECT_SPEED_ENABLE: true,
+    BLUE_CURVE_DIRECT_ACTIVATE_SEVERITY: 0.15,
+    BLUE_CURVE_DIRECT_EXPONENT: 0.90,
+    BLUE_CURVE_INNER_PWM_AT_FULL_CURVE: 70,
+    BLUE_CURVE_OUTER_PWM_AT_FULL_CURVE: 185,
 
     // Chuẩn hoá severity từ chính đường xanh.
     BLUE_CURVE_HEADING_FULL_DEG: 13,
