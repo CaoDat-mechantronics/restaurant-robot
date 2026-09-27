@@ -632,12 +632,12 @@
       // ===================================================
       // 4) Tốc độ cơ sở: cua gấp -> giảm tốc
       // ===================================================
-      const configuredBase = Number(this.config.BASE_SPEED) || 92;
+      const configuredBase = Number(this.config.BASE_SPEED) || 100;
       const minCurveSpeed = Math.min(
         configuredBase,
-        Number(this.config.MIN_CURVE_SPEED) || 44
+        Number(this.config.MIN_CURVE_SPEED) || 55
       );
-      const maxSpeed = Number(this.config.MAX_SPEED) || 155;
+      const maxSpeed = Number(this.config.MAX_SPEED) || 165;
 
       const fullSlowdownDeg = Math.max(
         8,
@@ -833,7 +833,7 @@
 
       const maxCorrection = Math.max(
         10,
-        Number(this.config.MAX_STEERING_CORRECTION) || 60
+        Number(this.config.MAX_STEERING_CORRECTION) || 55
       );
 
       // Với hộp số 1/120, khi baseSpeed đã giảm ở cua thì steering cũng
@@ -847,7 +847,7 @@
         0,
         Number.isFinite(configuredMinForwardForLimit)
           ? configuredMinForwardForLimit
-          : 4
+          : 14
       );
       const speedAwareMaxCorrection = Math.max(
         10,
@@ -869,8 +869,8 @@
       // ===================================================
       // correction < 0 -> Left chậm, Right nhanh -> cua trái
       // correction > 0 -> Left nhanh, Right chậm -> cua phải
-      // Hộp số 1/120 đã đủ mô-men: khi bám line chỉ cần giảm bánh trong,
-      // không reverse bánh trong vì reverse dễ làm xe giật và quá lái.
+      // LINE_FOLLOW không reverse bánh trong. Bánh trong được giảm tốc ở
+      // thang logic, sau đó tầng PWM sẽ bảo đảm torque floor để bánh vẫn lăn.
       const configuredMinForward = Number(
         this.config.LINE_FOLLOW_MIN_LOGICAL_SPEED
       );
@@ -878,7 +878,7 @@
         0,
         Number.isFinite(configuredMinForward)
           ? configuredMinForward
-          : 4
+          : 14
       );
 
       const leftTarget = this.clamp(
@@ -1040,7 +1040,7 @@
 
       const base = Math.min(
         88,
-        Number(this.config.BASE_SPEED) || 92
+        Number(this.config.BASE_SPEED) || 100
       );
 
       const positionKp = Number(this.config.POSITION_KP) || 0.075;
@@ -1181,7 +1181,7 @@
 
       const maxSpeed = Math.max(
         1,
-        Number(this.config.MAX_SPEED) || 155
+        Number(this.config.MAX_SPEED) || 165
       );
 
       nextLeft = this.clamp(nextLeft, -maxSpeed, maxSpeed);
@@ -1239,7 +1239,7 @@
 
         this.setMotorReason(
           "KICK_START",
-          `PWM>=${Number(this.config.MOTOR_START_BOOST_PWM) || 112} · còn ${remain} ms`
+          `PWM>=${Number(this.config.MOTOR_START_BOOST_PWM) || 118} · còn ${remain} ms`
         );
       }
 
@@ -1257,13 +1257,14 @@
     // Khác bản cũ: không ép cả hai bánh luôn >= MOTOR_CRUISE_PWM.
     // Mỗi bánh được map độc lập theo magnitude logic:
     //
-    //   logical rất nhỏ ở bánh trong cua -> 0 (coast, chỉ LINE_FOLLOW)
     //   logical nhỏ          -> MOTOR_MIN_RUN_PWM
     //   logical = BASE_SPEED -> MOTOR_CRUISE_PWM
     //   logical = MAX_SPEED  -> MOTOR_MAX_PWM
     //
-    // Vì vậy khi cua, bánh trong thực sự giảm tốc và curve slowdown thực sự
-    // làm cả xe chậm lại. Đây phù hợp hơn khi hộp số 1/120 đã đủ mô-men.
+    // Sau mapping, LINE_FOLLOW / REACQUIRE_LINE áp dụng torque floor:
+    // bánh trong không được tụt xuống vùng có điện nhưng không đủ mô-men.
+    // Nếu phải nâng bánh trong, bánh ngoài cũng được nâng tương ứng để
+    // giữ độ chênh steering. TURNING không dùng torque floor.
     // =====================================================
 
     mapMotorPairToPwm(left, right, boostActive = false) {
@@ -1272,56 +1273,13 @@
         Number(this.config.MOTOR_ZERO_CUTOFF_LOGICAL) || 0.5
       );
 
-      let leftValue = Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
-      let rightValue = Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
+      const leftValue =
+        Math.abs(left) <= zeroCutoff ? 0 : Number(left) || 0;
+      const rightValue =
+        Math.abs(right) <= zeroCutoff ? 0 : Number(right) || 0;
 
       if (leftValue === 0 && rightValue === 0) {
         return { left: 0, right: 0 };
-      }
-
-      // ---------------------------------------------------
-      // INNER-WHEEL COAST - chỉ dùng khi đang LINE_FOLLOW.
-      //
-      // Vấn đề thực tế với hộp số 1/120:
-      // controller có thể yêu cầu logical 4..10 cho bánh trong cua,
-      // nhưng mapping cũ lại ép bánh đó lên MOTOR_MIN_RUN_PWM (~60),
-      // khiến cả hai bên vẫn kéo mạnh và xe gần như đi thẳng.
-      //
-      // Khi một bánh rất chậm và bánh còn lại nhanh hơn đủ nhiều,
-      // cho bánh trong về 0 để tạo moment quay rõ ràng.
-      // Không áp dụng trong TURNING nên quay gyro -PWM/+PWM vẫn giữ nguyên.
-      // ---------------------------------------------------
-      if (this.state === NAV_STATE.LINE_FOLLOW) {
-        const coastThreshold = Math.max(
-          0,
-          Number(this.config.INNER_WHEEL_COAST_LOGICAL) || 16
-        );
-        const coastMinGap = Math.max(
-          0,
-          Number(this.config.INNER_WHEEL_COAST_MIN_GAP_LOGICAL) || 24
-        );
-
-        const sameForwardDirection = leftValue >= 0 && rightValue >= 0;
-
-        if (sameForwardDirection) {
-          const leftMag = Math.abs(leftValue);
-          const rightMag = Math.abs(rightValue);
-
-          if (
-            leftMag > 0 &&
-            leftMag <= coastThreshold &&
-            rightMag - leftMag >= coastMinGap
-          ) {
-            leftValue = 0;
-          }
-          else if (
-            rightMag > 0 &&
-            rightMag <= coastThreshold &&
-            leftMag - rightMag >= coastMinGap
-          ) {
-            rightValue = 0;
-          }
-        }
       }
 
       const minRunPwm = this.clamp(
@@ -1331,13 +1289,13 @@
       );
 
       const cruisePwm = this.clamp(
-        Number(this.config.MOTOR_CRUISE_PWM) || 92,
+        Number(this.config.MOTOR_CRUISE_PWM) || 105,
         minRunPwm,
         254
       );
 
       const maxPwm = this.clamp(
-        Number(this.config.MOTOR_MAX_PWM) || 155,
+        Number(this.config.MOTOR_MAX_PWM) || 165,
         cruisePwm,
         255
       );
@@ -1361,14 +1319,89 @@
         maxPwm
       );
 
-      // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá chênh lệch
-      // trái/phải. Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
+      // ---------------------------------------------------
+      // FORWARD TORQUE FLOOR - LINE_FOLLOW / REACQUIRE_LINE
+      // ---------------------------------------------------
+      // Cả hai bánh phải tiếp tục LĂN trong lúc bám line.
+      // Nếu bánh trong thấp hơn torque floor, nâng nó lên floor và
+      // tăng bánh ngoài cùng lượng để giữ gần nguyên chênh lệch PWM.
+      //
+      // Ví dụ rẽ trái: 58 / 110, floor=70
+      //   deficit = 12 -> 70 / 122
+      // Rẽ phải được xử lý hoàn toàn đối xứng.
+      //
+      // Không áp dụng trong TURNING, vì TURNING cần -PWM/+PWM để pivot.
+      // ---------------------------------------------------
+      const forwardTrackingState =
+        this.state === NAV_STATE.LINE_FOLLOW ||
+        this.state === NAV_STATE.REACQUIRE_LINE;
+
+      if (
+        forwardTrackingState &&
+        leftPwm > 0 &&
+        rightPwm > 0
+      ) {
+        const torqueFloor = this.clamp(
+          Number(this.config.LINE_FOLLOW_TORQUE_FLOOR_PWM) || 70,
+          minRunPwm,
+          maxPwm
+        );
+
+        if (leftPwm < rightPwm && leftPwm < torqueFloor) {
+          const deficit = torqueFloor - leftPwm;
+          leftPwm = torqueFloor;
+          rightPwm = Math.min(maxPwm, rightPwm + deficit);
+        }
+        else if (rightPwm < leftPwm && rightPwm < torqueFloor) {
+          const deficit = torqueFloor - rightPwm;
+          rightPwm = torqueFloor;
+          leftPwm = Math.min(maxPwm, leftPwm + deficit);
+        }
+        else if (leftPwm === rightPwm && leftPwm < torqueFloor) {
+          // Chạy thẳng ở tốc độ thấp: nếu đã quyết định chạy thì cả hai
+          // bánh phải vượt ma sát tĩnh cùng nhau.
+          leftPwm = torqueFloor;
+          rightPwm = torqueFloor;
+        }
+      }
+
+      // ---------------------------------------------------
+      // MOTOR TRIM - để hiệu chuẩn sai số motor/driver/nguồn thực tế.
+      // Mặc định 1.00/1.00 nên không thay đổi hành vi cho tới khi bạn tune.
+      // ---------------------------------------------------
+      const leftTrimRaw = Number(this.config.LEFT_MOTOR_TRIM);
+      const rightTrimRaw = Number(this.config.RIGHT_MOTOR_TRIM);
+      const leftTrim = Number.isFinite(leftTrimRaw)
+        ? this.clamp(leftTrimRaw, 0.80, 1.20)
+        : 1.00;
+      const rightTrim = Number.isFinite(rightTrimRaw)
+        ? this.clamp(rightTrimRaw, 0.80, 1.20)
+        : 1.00;
+
+      if (leftPwm !== 0) {
+        leftPwm = Math.sign(leftPwm) * Math.round(
+          this.clamp(Math.abs(leftPwm) * leftTrim, 0, maxPwm)
+        );
+      }
+
+      if (rightPwm !== 0) {
+        rightPwm = Math.sign(rightPwm) * Math.round(
+          this.clamp(Math.abs(rightPwm) * rightTrim, 0, maxPwm)
+        );
+      }
+
+      // Boost chỉ nâng mức tối thiểu của bánh đang quay; không phá hướng.
+      // Với cấu hình gear 1/120 mặc định boostMs=0 nên nhánh này tắt.
       if (boostActive) {
         if (leftPwm !== 0) {
-          leftPwm = Math.sign(leftPwm) * Math.max(Math.abs(leftPwm), boostPwm);
+          leftPwm =
+            Math.sign(leftPwm) *
+            Math.max(Math.abs(leftPwm), boostPwm);
         }
         if (rightPwm !== 0) {
-          rightPwm = Math.sign(rightPwm) * Math.max(Math.abs(rightPwm), boostPwm);
+          rightPwm =
+            Math.sign(rightPwm) *
+            Math.max(Math.abs(rightPwm), boostPwm);
         }
       }
 
@@ -1384,11 +1417,11 @@
 
       const logicalBase = Math.max(
         1,
-        Number(this.config.BASE_SPEED) || 92
+        Number(this.config.BASE_SPEED) || 100
       );
       const logicalMax = Math.max(
         logicalBase + 1,
-        Number(this.config.MAX_SPEED) || 155
+        Number(this.config.MAX_SPEED) || 165
       );
 
       let pwm;
