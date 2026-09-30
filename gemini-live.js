@@ -275,6 +275,24 @@ QUY TẮC BẮT BUỘC:
               ]
             },
 
+            // Khôi phục hành vi hội thoại Gemini Live kiểu cũ:
+            // mic luôn mở sau khi nhấn "Nhận lệnh"; khi người dùng
+            // ngừng nói một khoảng ngắn, Gemini tự chốt lượt và trả lời.
+            // Không cần bấm "Dừng nghe" để nhận câu trả lời.
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                startOfSpeechSensitivity:
+                  "START_SENSITIVITY_HIGH",
+                endOfSpeechSensitivity:
+                  "END_SENSITIVITY_HIGH",
+                prefixPaddingMs: 100,
+                silenceDurationMs: 800
+              },
+              activityHandling:
+                "START_OF_ACTIVITY_INTERRUPTS"
+            },
+
             systemInstruction: {
               parts: [
                 {
