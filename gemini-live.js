@@ -275,24 +275,6 @@ QUY TẮC BẮT BUỘC:
               ]
             },
 
-            // Khôi phục hành vi hội thoại Gemini Live kiểu cũ:
-            // mic luôn mở sau khi nhấn "Nhận lệnh"; khi người dùng
-            // ngừng nói một khoảng ngắn, Gemini tự chốt lượt và trả lời.
-            // Không cần bấm "Dừng nghe" để nhận câu trả lời.
-            realtimeInputConfig: {
-              automaticActivityDetection: {
-                disabled: false,
-                startOfSpeechSensitivity:
-                  "START_SENSITIVITY_HIGH",
-                endOfSpeechSensitivity:
-                  "END_SENSITIVITY_HIGH",
-                prefixPaddingMs: 100,
-                silenceDurationMs: 800
-              },
-              activityHandling:
-                "START_OF_ACTIVITY_INTERRUPTS"
-            },
-
             systemInstruction: {
               parts: [
                 {
@@ -343,11 +325,21 @@ QUY TẮC BẮT BUỘC:
           return;
         }
 
-        this.onDebug(
-          "← " +
-          JSON.stringify(message)
-            .slice(0, 1800)
+        // Raw PCM chunks are frequent and large. Logging them forces repeated
+        // JSON/base64 processing + DOM updates and can starve realtime audio.
+        const hasInlineAudio = Boolean(
+          message?.serverContent?.modelTurn?.parts?.some(
+            (part) => part?.inlineData?.data
+          )
         );
+
+        if (!hasInlineAudio) {
+          this.onDebug(
+            "← " +
+            JSON.stringify(message)
+              .slice(0, 1800)
+          );
+        }
 
         if (message.setupComplete) {
           clearTimeout(setupTimer);
@@ -889,15 +881,23 @@ QUY TẮC BẮT BUỘC:
       );
     }
 
-    this.onDebug(
-      "→ " +
-      JSON.stringify(object)
-        .slice(0, 1600)
+    const payload =
+      JSON.stringify(object);
+
+    // Do not dump microphone PCM/base64 into the UI debug log. At 48 kHz with
+    // ScriptProcessor(4096) this can happen ~12 times/second and causes jank.
+    const isMicAudio = Boolean(
+      object?.realtimeInput?.audio?.data
     );
 
-    this.socket.send(
-      JSON.stringify(object)
-    );
+    if (!isMicAudio) {
+      this.onDebug(
+        "→ " +
+        payload.slice(0, 1600)
+      );
+    }
+
+    this.socket.send(payload);
   }
 
   // =========================================================

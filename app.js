@@ -1263,6 +1263,13 @@
         }
 
         try {
+          // Mobile browsers may keep AudioContext suspended unless it is resumed
+          // from a direct user gesture. This only unlocks playback; Gemini logic
+          // and automatic VAD remain unchanged.
+          if (window.RobotAudio?.unlock) {
+            await window.RobotAudio.unlock();
+          }
+
           const live =
             getLive();
 
