@@ -267,6 +267,12 @@
         return;
       }
 
+      // Debug/manual line-follow chỉ dùng camera để bám line.
+      // Không xử lý QR bàn/ngã rẽ khi không có một task giao món thật.
+      if (this.task?.manual_control === true) {
+        return;
+      }
+
       const payload =
         typeof qr === "string"
           ? { text: qr }

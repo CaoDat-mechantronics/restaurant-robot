@@ -21,6 +21,11 @@
     robotStatus: "disconnected",
     cameraDebugOpen: false,
 
+    // Điều khiển manual trong bảng Debug.
+    manualTurnTimer: null,
+    manualTurnToken: 0,
+    manualSavedTask: null,
+
     // Dùng để đồng bộ task đang có ở backend với RobotNavigation local.
     navigationStarting: false,
     navigationTaskKey: null,
@@ -861,7 +866,234 @@
     }
   }
 
+  function setManualControlState(message, cls = "") {
+    const el = $("manualControlState");
+    if (!el) return;
+    el.textContent = message;
+    el.className = `manual-control-state${cls ? ` ${cls}` : ""}`;
+  }
+
+  function rememberManualTask() {
+    const task = navigation?.task;
+    if (task && task.manual_control !== true) {
+      controlState.manualSavedTask = { ...task };
+    }
+  }
+
+  function cancelManualTurn({ stopMotor = true } = {}) {
+    controlState.manualTurnToken += 1;
+
+    if (controlState.manualTurnTimer) {
+      clearInterval(controlState.manualTurnTimer);
+      controlState.manualTurnTimer = null;
+    }
+
+    if (stopMotor) {
+      try {
+        navigation.sendMotor(0, 0, true);
+      } catch (_) {
+        try { mqttBridge.stopMotor(); } catch (_) {}
+      }
+    }
+  }
+
+  function stopNavigationForManual(reason) {
+    rememberManualTask();
+
+    if (controlState.navigationTaskKey) {
+      controlState.blockedResumeTaskKey = controlState.navigationTaskKey;
+    }
+
+    if (
+      navigation.state !== "IDLE" &&
+      navigation.state !== "STOPPED" &&
+      navigation.state !== "ERROR"
+    ) {
+      navigation.stop(reason);
+    } else {
+      navigation.sendMotor(0, 0, true);
+    }
+  }
+
+  async function waitForYaw(timeoutMs = 1800) {
+    let yaw = orientation.getYaw();
+    if (yaw != null) return yaw;
+
+    if (!controlState.orientationPermissionReady) {
+      await requestOrientationPermission();
+    } else {
+      orientation.start();
+    }
+
+    const startedAt = performance.now();
+    while (performance.now() - startedAt < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      yaw = orientation.getYaw();
+      if (yaw != null) return yaw;
+    }
+
+    return null;
+  }
+
+  async function manualTurn(direction, rawAngle) {
+    const targetAngle = Math.max(1, Math.min(360, Number(rawAngle) || 90));
+    const dir = direction === "LEFT" ? "LEFT" : "RIGHT";
+
+    if (!mqttBridge.connected) {
+      setManualControlState("MQTT chưa kết nối", "bad");
+      setMessage("Không thể quay manual: MQTT WebSocket chưa connected.", true);
+      return;
+    }
+
+    cancelManualTurn({ stopMotor: true });
+    stopNavigationForManual(`manual ${dir.toLowerCase()}`);
+
+    const startYaw = await waitForYaw();
+    if (startYaw == null) {
+      setManualControlState("Chưa có dữ liệu gyro", "bad");
+      setMessage("Không thể quay theo góc vì chưa đọc được yaw. Hãy bấm Cho phép Gyro/Camera.", true);
+      return;
+    }
+
+    const token = ++controlState.manualTurnToken;
+    const startedAt = performance.now();
+    const timeoutMs = Math.max(10000, targetAngle * 180);
+    const tolerance = Math.max(
+      0.8,
+      Number(navConfig.TURN_TARGET_TOLERANCE_DEG) || 2
+    );
+
+    setManualControlState(`Đang quay ${dir === "LEFT" ? "trái" : "phải"} 0/${targetAngle}°`, "warn");
+    setMessage(`Manual: đang quay ${dir === "LEFT" ? "trái" : "phải"} ${targetAngle}° bằng gyro.`);
+    log(`MANUAL TURN ${dir} target=${targetAngle} startYaw=${Number(startYaw).toFixed(1)}`);
+
+    const tick = () => {
+      if (token !== controlState.manualTurnToken) return;
+
+      const yaw = orientation.getYaw();
+      if (yaw == null) {
+        cancelManualTurn({ stopMotor: true });
+        setManualControlState("Mất dữ liệu gyro", "bad");
+        setMessage("Manual turn đã dừng vì mất dữ liệu yaw.", true);
+        return;
+      }
+
+      const turned = Math.abs(
+        window.RobotOrientation.deltaDegrees(yaw, startYaw)
+      );
+
+      if (turned >= Math.max(0, targetAngle - tolerance)) {
+        cancelManualTurn({ stopMotor: true });
+        setManualControlState(`Hoàn tất ${turned.toFixed(1)}°`, "good");
+        setMessage(`Manual: đã quay ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}°.`);
+        log(`MANUAL TURN DONE ${dir} angle=${turned.toFixed(1)}`);
+        return;
+      }
+
+      if (performance.now() - startedAt > timeoutMs) {
+        cancelManualTurn({ stopMotor: true });
+        setManualControlState("Timeout", "bad");
+        setMessage(`Manual turn timeout trước khi đạt ${targetAngle}°.`, true);
+        log(`MANUAL TURN TIMEOUT ${dir} angle=${turned.toFixed(1)}/${targetAngle}`);
+        return;
+      }
+
+      const remaining = Math.max(0, targetAngle - turned);
+      let speed;
+      if (remaining > 35) {
+        speed = Number(navConfig.TURN_FAST_SPEED) || 88;
+      } else if (remaining > 12) {
+        speed = Number(navConfig.TURN_MEDIUM_SPEED) || 68;
+      } else {
+        speed = Number(navConfig.TURN_SLOW_SPEED) || 48;
+      }
+
+      if (dir === "LEFT") {
+        navigation.sendMotor(-speed, speed, true);
+      } else {
+        navigation.sendMotor(speed, -speed, true);
+      }
+
+      setManualControlState(
+        `Đang quay ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}/${targetAngle}°`,
+        "warn"
+      );
+    };
+
+    tick();
+    controlState.manualTurnTimer = window.setInterval(
+      tick,
+      Math.max(35, Number(navConfig.MOTOR_INTERVAL_MS) || 40)
+    );
+  }
+
+  async function manualLineFollow() {
+    if (!mqttBridge.connected) {
+      setManualControlState("MQTT chưa kết nối", "bad");
+      setMessage("Không thể bám line: MQTT WebSocket chưa connected.", true);
+      return;
+    }
+
+    cancelManualTurn({ stopMotor: true });
+
+    try {
+      if (!controlState.orientationPermissionReady) {
+        await requestOrientationPermission();
+      } else {
+        orientation.start();
+      }
+
+      if (!controlState.cameraPermissionReady) {
+        await prepareCameraPermission();
+      }
+
+      const savedTask = controlState.manualSavedTask;
+      const existingTask = navigation?.task;
+      const task =
+        savedTask ||
+        (existingTask && existingTask.manual_control !== true ? { ...existingTask } : null);
+
+      if (task) {
+        await startNavigation(task);
+        const taskKey = buildNavigationTaskKey(task);
+        if (taskKey) {
+          controlState.navigationTaskKey = taskKey;
+          controlState.blockedResumeTaskKey = null;
+        }
+        setManualControlState("Đang bám line · task hiện tại", "good");
+        log(`MANUAL LINE FOLLOW task=${JSON.stringify(task)}`);
+      } else {
+        await vision.start(
+          $("robotCamera"),
+          $("visionOverlay")
+        );
+        updateCameraSwitchButton();
+        navigation.updateSensors(controlState.sensors);
+        navigation.start({ manual_control: true });
+        setMessage("Manual: đang bám line. QR bàn/ngã rẽ sẽ không được xử lý trong chế độ test này.");
+        setManualControlState("Đang bám line", "good");
+        log("MANUAL LINE FOLLOW without delivery task");
+      }
+    }
+    catch (error) {
+      cancelManualTurn({ stopMotor: true });
+      setManualControlState("Không khởi động được", "bad");
+      setMessage(`Không thể bật bám line manual: ${error.message}`, true);
+      log(`MANUAL LINE ERROR: ${error.message}`);
+    }
+  }
+
+  function manualStop() {
+    cancelManualTurn({ stopMotor: true });
+    stopEverything("manual STOP");
+    setManualControlState("Đã STOP", "bad");
+    log("MANUAL STOP");
+  }
+
   function stopEverything(reason = "manual") {
+    cancelManualTurn({ stopMotor: false });
+    rememberManualTask();
+
     // Ghi nhớ task bị người dùng dừng để status polling không tự bật lại.
     if (controlState.navigationTaskKey) {
       controlState.blockedResumeTaskKey = controlState.navigationTaskKey;
@@ -883,6 +1115,10 @@
 
   function switchRobot(robotNumber) {
     const next = Number(robotNumber) || 1;
+
+    cancelManualTurn({ stopMotor: true });
+    controlState.manualSavedTask = null;
+    setManualControlState("Sẵn sàng");
 
     if (navigation.state === "LINE_FOLLOW" || navigation.state === "TURNING") {
       stopEverything("đổi robot");
@@ -938,9 +1174,11 @@
     }
 
     // Khi backend xác nhận robot không còn ON TASK, task cũ kết thúc.
-    // Cho phép task tiếp theo được auto-resume bình thường.
+    // Cho phép task tiếp theo được auto-resume bình thường và không giữ
+    // task cũ cho nút BÁM LINE manual.
     controlState.navigationTaskKey = null;
     controlState.blockedResumeTaskKey = null;
+    controlState.manualSavedTask = null;
   });
 
   $("cameraDebugButton")?.addEventListener("click", async () => {
@@ -1003,6 +1241,20 @@
     }
   });
 
+  $("manualTurnLeftButton")?.addEventListener("click", () => {
+    manualTurn("LEFT", $("manualTurnLeftAngle")?.value);
+  });
+
+  $("manualTurnRightButton")?.addEventListener("click", () => {
+    manualTurn("RIGHT", $("manualTurnRightAngle")?.value);
+  });
+
+  $("manualLineFollowButton")?.addEventListener("click", () => {
+    manualLineFollow();
+  });
+
+  $("manualStopButton")?.addEventListener("click", manualStop);
+
   $("motionPermissionButton")?.addEventListener("click", preparePermissions);
 
   $("stopRobotButton")?.addEventListener("click", () => {
@@ -1020,11 +1272,13 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
       // Không để robot tiếp tục chạy nếu tab bị đưa nền.
+      cancelManualTurn({ stopMotor: false });
       mqttBridge.stopMotor();
     }
   });
 
   window.addEventListener("beforeunload", () => {
+    cancelManualTurn({ stopMotor: false });
     mqttBridge.stopMotor();
     vision.stop();
     mqttBridge.close();
@@ -1032,6 +1286,7 @@
 
   async function boot() {
     setDebugAvailability(false);
+    setManualControlState("Sẵn sàng");
     updateSensorUi();
     setMqttUi("connecting");
 
@@ -1054,6 +1309,9 @@
     vision,
     orientation,
     stop: stopEverything,
-    preparePermissions
+    preparePermissions,
+    manualTurn,
+    manualLineFollow,
+    manualStop
   };
 })();

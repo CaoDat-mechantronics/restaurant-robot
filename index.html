@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css"
+    href="styles.css?v=20260930-manual-debug-1"
   >
 </head>
 
@@ -40,6 +40,31 @@
     </div>
 
     <div class="top-actions">
+
+      <button
+        id="settingsButton"
+        class="top-icon-button"
+        type="button"
+        title="Cài đặt"
+        aria-controls="settingsPanel"
+        aria-expanded="false"
+      >
+        <span class="settings-icon" aria-hidden="true">⚙</span>
+        <span class="top-button-label">Cài đặt</span>
+      </button>
+
+      <label
+        class="debug-switch top-debug-switch"
+        title="Bật hoặc tắt giao diện debug"
+      >
+        <input
+          id="debugModeToggle"
+          type="checkbox"
+          aria-label="Bật chế độ debug"
+        >
+        <span class="switch-track" aria-hidden="true"><span></span></span>
+        <span class="debug-switch-label">Debug</span>
+      </label>
 
       <select id="robotSelect">
         <option value="1">
@@ -177,7 +202,7 @@
       <div class="camera-action-row">
         <button
           id="cameraDebugButton"
-          class="camera-debug-button ghost"
+          class="camera-debug-button ghost debug-only"
           hidden
           type="button"
         >
@@ -197,7 +222,7 @@
 
       <section
         id="cameraDebugPanel"
-        class="camera-debug-panel debug-collapsed"
+        class="camera-debug-panel debug-collapsed debug-only"
         aria-hidden="true"
       >
         <div class="camera-debug-header">
@@ -489,13 +514,49 @@
 
       <!-- DEBUG -->
       <details
-        class="card"
+        id="textDebugCard"
+        class="card debug-only"
         open
       >
 
         <summary>
-          Debug bằng text
+          Debug &amp; điều khiển
         </summary>
+
+        <div class="manual-control-block">
+          <div class="manual-control-head">
+            <div>
+              <b>Điều khiển chuyển động manual</b>
+              <small>Điều khiển trực tiếp để test robot. Khi dùng quay manual, bám line tự động sẽ tạm dừng.</small>
+            </div>
+            <span id="manualControlState" class="manual-control-state">Sẵn sàng</span>
+          </div>
+
+          <div class="manual-turn-grid">
+            <div class="manual-turn-row">
+              <button id="manualTurnLeftButton" type="button" class="ghost manual-action-button">↶ Quay trái</button>
+              <label class="manual-angle-field">
+                <input id="manualTurnLeftAngle" type="number" min="1" max="360" step="1" value="90" inputmode="numeric">
+                <span>°</span>
+              </label>
+            </div>
+
+            <div class="manual-turn-row">
+              <button id="manualTurnRightButton" type="button" class="ghost manual-action-button">Quay phải ↷</button>
+              <label class="manual-angle-field">
+                <input id="manualTurnRightAngle" type="number" min="1" max="360" step="1" value="90" inputmode="numeric">
+                <span>°</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="manual-mode-row">
+            <button id="manualLineFollowButton" type="button" class="manual-line-button">BÁM LINE</button>
+            <button id="manualStopButton" type="button" class="danger manual-stop-button">STOP</button>
+          </div>
+        </div>
+
+        <div class="debug-section-divider"></div>
 
         <p class="muted">
           Test tool calling không cần microphone.
@@ -524,6 +585,62 @@
 
   </main>
 
+</div>
+
+
+<!-- =====================================================
+     SETTINGS
+     ===================================================== -->
+<div
+  id="settingsOverlay"
+  class="settings-overlay settings-hidden"
+  aria-hidden="true"
+>
+  <section
+    id="settingsPanel"
+    class="settings-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="settingsTitle"
+  >
+    <div class="settings-header">
+      <div>
+        <h2 id="settingsTitle">Cài đặt</h2>
+        <p>Thiết lập nhanh cho giao diện robot.</p>
+      </div>
+      <button
+        id="settingsCloseButton"
+        class="settings-close"
+        type="button"
+        aria-label="Đóng cài đặt"
+      >×</button>
+    </div>
+
+    <div class="settings-content">
+      <label class="settings-field">
+        <span>Robot đang điều khiển</span>
+        <select id="settingsRobotSelect">
+          <option value="1">Robot 1</option>
+          <option value="2">Robot 2</option>
+        </select>
+      </label>
+
+      <div class="settings-row">
+        <div>
+          <b>Chế độ Debug</b>
+          <small>Hiện Debug bằng text và công cụ debug camera.</small>
+        </div>
+        <label class="debug-switch settings-debug-switch">
+          <input
+            id="settingsDebugToggle"
+            type="checkbox"
+            aria-label="Bật chế độ debug trong cài đặt"
+          >
+          <span class="switch-track" aria-hidden="true"><span></span></span>
+        </label>
+      </div>
+    </div>
+  </section>
 </div>
 
 
@@ -601,13 +718,13 @@
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <script src="audio.js?v=20260930-audioworklet-2"></script>
-<script src="gemini-live.js?v=20260930-audioworklet-1"></script>
+<script src="gemini-live.js?v=20260930-default-vad-restore-1"></script>
 <script src="mqtt-robot.js?v=20260930-audioworklet-1"></script>
 <script src="orientation.js?v=20260930-audioworklet-1"></script>
 <script src="vision.js?v=20260930-audioworklet-1"></script>
-<script src="navigation.js?v=20260930-audioworklet-1"></script>
+<script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20260930-audioworklet-1"></script>
+<script src="robot-control.js?v=20260930-manual-debug-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
@@ -635,6 +752,105 @@
   setText("visionSourceBuildState", sourceBuild);
   setText("moduleBuildState", moduleBuild);
   setText("visionModuleBuildState", moduleBuild);
+})();
+</script>
+
+<script>
+(() => {
+  const DEBUG_STORAGE_KEY = "robot_debug_enabled";
+
+  const settingsButton = document.getElementById("settingsButton");
+  const settingsOverlay = document.getElementById("settingsOverlay");
+  const settingsPanel = document.getElementById("settingsPanel");
+  const settingsCloseButton = document.getElementById("settingsCloseButton");
+  const debugModeToggle = document.getElementById("debugModeToggle");
+  const settingsDebugToggle = document.getElementById("settingsDebugToggle");
+  const robotSelect = document.getElementById("robotSelect");
+  const settingsRobotSelect = document.getElementById("settingsRobotSelect");
+
+  const readDebugState = () => {
+    try {
+      return localStorage.getItem(DEBUG_STORAGE_KEY) === "1";
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const writeDebugState = (enabled) => {
+    try {
+      localStorage.setItem(DEBUG_STORAGE_KEY, enabled ? "1" : "0");
+    } catch (_) {}
+  };
+
+  const applyDebugState = (enabled, persist = true) => {
+    const value = Boolean(enabled);
+    document.body.classList.toggle("debug-mode-enabled", value);
+
+    if (debugModeToggle) debugModeToggle.checked = value;
+    if (settingsDebugToggle) settingsDebugToggle.checked = value;
+
+    if (!value) {
+      const cameraPanel = document.getElementById("cameraDebugPanel");
+      const cameraCloseButton = document.getElementById("cameraDebugCloseButton");
+      if (cameraPanel && !cameraPanel.classList.contains("debug-collapsed")) {
+        cameraCloseButton?.click();
+      }
+    }
+
+    if (persist) writeDebugState(value);
+  };
+
+  const openSettings = () => {
+    if (!settingsOverlay) return;
+    if (settingsRobotSelect && robotSelect) {
+      settingsRobotSelect.value = robotSelect.value;
+    }
+    settingsOverlay.classList.remove("settings-hidden");
+    settingsOverlay.setAttribute("aria-hidden", "false");
+    settingsButton?.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => settingsCloseButton?.focus());
+  };
+
+  const closeSettings = () => {
+    if (!settingsOverlay) return;
+    settingsOverlay.classList.add("settings-hidden");
+    settingsOverlay.setAttribute("aria-hidden", "true");
+    settingsButton?.setAttribute("aria-expanded", "false");
+    settingsButton?.focus();
+  };
+
+  applyDebugState(readDebugState(), false);
+
+  debugModeToggle?.addEventListener("change", () => {
+    applyDebugState(debugModeToggle.checked);
+  });
+
+  settingsDebugToggle?.addEventListener("change", () => {
+    applyDebugState(settingsDebugToggle.checked);
+  });
+
+  settingsButton?.addEventListener("click", openSettings);
+  settingsCloseButton?.addEventListener("click", closeSettings);
+
+  settingsOverlay?.addEventListener("click", (event) => {
+    if (event.target === settingsOverlay) closeSettings();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !settingsOverlay?.classList.contains("settings-hidden")) {
+      closeSettings();
+    }
+  });
+
+  settingsRobotSelect?.addEventListener("change", () => {
+    if (!robotSelect || robotSelect.value === settingsRobotSelect.value) return;
+    robotSelect.value = settingsRobotSelect.value;
+    robotSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  robotSelect?.addEventListener("change", () => {
+    if (settingsRobotSelect) settingsRobotSelect.value = robotSelect.value;
+  });
 })();
 </script>
 
