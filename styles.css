@@ -2444,6 +2444,124 @@ body:not(.debug-mode-enabled) .debug-only {
   transform: translateY(1px);
 }
 
+.settings-advanced-button {
+  width: 100%;
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #31577c;
+  border-radius: 12px;
+  padding: 11px 14px;
+  background: #123052;
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.settings-advanced-button:hover,
+.settings-advanced-button:focus-visible {
+  border-color: #5de7ff;
+  background: #173c64;
+  outline: none;
+}
+
+.settings-advanced-button > span:last-child {
+  color: #77e7ff;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.settings-subpanel-hidden {
+  display: none;
+}
+
+.settings-advanced-header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: start;
+}
+
+.settings-header-copy {
+  min-width: 0;
+}
+
+.settings-back {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #10233a;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-back:hover,
+.settings-back:focus-visible,
+.settings-close:hover,
+.settings-close:focus-visible {
+  border-color: #5de7ff80;
+  background: #15304e;
+  outline: none;
+}
+
+.settings-speed-field > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-speed-field > span b {
+  font-size: 13px;
+}
+
+.settings-speed-field > span small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.settings-speed-field .settings-number-control input {
+  width: 82px;
+}
+
+.settings-advanced-note {
+  padding: 11px 12px;
+  border: 1px dashed #31577c;
+  border-radius: 11px;
+  color: var(--muted);
+  background: #07111f88;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.settings-advanced-esp32-button {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 9px 10px;
+  background: #10233a;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-advanced-esp32-button:hover {
+  border-color: #58a8ff;
+  background: #143052;
+}
+
+.settings-advanced-esp32-button:active {
+  transform: translateY(1px);
+}
+
 @media (max-width: 820px) {
   .top-icon-button {
     width: 36px;

@@ -674,11 +674,148 @@
         </div>
       </label>
 
+      <button
+        id="settingsAdvancedButton"
+        class="settings-advanced-button"
+        type="button"
+        aria-controls="advancedSettingsPanel"
+      >
+        <span>Setting Advance</span>
+        <span aria-hidden="true">›</span>
+      </button>
+
       <div class="settings-actions">
         <button id="settingsUpdateServerButton" type="button">
           Update to Server
         </button>
         <button id="settingsSaveStorageButton" type="button">
+          Save to Storage
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section
+    id="advancedSettingsPanel"
+    class="settings-panel settings-subpanel settings-subpanel-hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="advancedSettingsTitle"
+    aria-hidden="true"
+  >
+    <div class="settings-header settings-advanced-header">
+      <button
+        id="settingsAdvancedBackButton"
+        class="settings-back"
+        type="button"
+        aria-label="Quay lại cài đặt"
+      >←</button>
+      <div class="settings-header-copy">
+        <h2 id="advancedSettingsTitle">Cài đặt nâng cao</h2>
+        <p>Điều chỉnh tốc độ chuyển động của robot.</p>
+      </div>
+      <button
+        id="settingsAdvancedCloseButton"
+        class="settings-close"
+        type="button"
+        aria-label="Đóng cài đặt nâng cao"
+      >×</button>
+    </div>
+
+    <div class="settings-content">
+      <label class="settings-field settings-number-field settings-speed-field">
+        <span>
+          <b>Tốc độ quay</b>
+          <small>Quay tại chỗ theo gyro.</small>
+        </span>
+        <div class="settings-number-control">
+          <input
+            id="settingsRotateSpeed"
+            type="number"
+            min="1"
+            max="155"
+            step="1"
+            value="125"
+            inputmode="numeric"
+            aria-label="Tốc độ quay"
+          >
+          <span>logic</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field">
+        <span>
+          <b>Tốc độ rẽ</b>
+          <small>Tốc độ nền khi xe vào cua gắt.</small>
+        </span>
+        <div class="settings-number-control">
+          <input
+            id="settingsTurnSpeed"
+            type="number"
+            min="1"
+            max="155"
+            step="1"
+            value="110"
+            inputmode="numeric"
+            aria-label="Tốc độ rẽ"
+          >
+          <span>logic</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field">
+        <span>
+          <b>Tốc độ bám line</b>
+          <small>Tốc độ nền khi xe đi thẳng theo line.</small>
+        </span>
+        <div class="settings-number-control">
+          <input
+            id="settingsLineFollowSpeed"
+            type="number"
+            min="1"
+            max="155"
+            step="1"
+            value="85"
+            inputmode="numeric"
+            aria-label="Tốc độ bám line"
+          >
+          <span>logic</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field">
+        <span>
+          <b>Tốc độ vào cua</b>
+          <small>Tốc độ sử dụng khi robot bắt đầu ôm cua.</small>
+        </span>
+        <div class="settings-number-control">
+          <input
+            id="settingsCornerEntrySpeed"
+            type="number"
+            min="1"
+            max="155"
+            step="1"
+            value="120"
+            inputmode="numeric"
+            aria-label="Tốc độ vào cua"
+          >
+          <span>logic</span>
+        </div>
+      </label>
+
+      <button
+        id="settingsAdvancedUpdateEsp32Button"
+        class="settings-advanced-esp32-button"
+        type="button"
+      >
+        Update to ESP32
+      </button>
+
+      <div class="settings-actions">
+        <button id="settingsAdvancedUpdateServerButton" type="button">
+          Update to Server
+        </button>
+        <button id="settingsAdvancedSaveStorageButton" type="button">
           Save to Storage
         </button>
       </div>
@@ -801,9 +938,29 @@
 <script>
 (() => {
   const DEBUG_STORAGE_KEY = "robot_debug_enabled";
-  const SETTINGS_STORAGE_KEY = "robot_settings_v1";
+  const SETTINGS_STORAGE_KEY = "robot_setting_official";
+  const LEGACY_SETTINGS_STORAGE_KEY = "robot_settings_v1";
   const DEFAULT_U_TURN_ANGLE = 180;
   const DEFAULT_TURN_ANGLE = 90;
+
+  const navigationConfig = window.APP_CONFIG?.NAVIGATION || {};
+  const MAX_LOGICAL_SPEED = Math.max(1, Number(navigationConfig.MAX_SPEED) || 155);
+  const DEFAULT_ROTATE_SPEED = Math.min(
+    MAX_LOGICAL_SPEED,
+    Math.max(1, Number(navigationConfig.TURN_FAST_SPEED) || 125)
+  );
+  const DEFAULT_ADVANCED_TURN_SPEED = Math.min(
+    MAX_LOGICAL_SPEED,
+    Math.max(1, Number(navigationConfig.MIN_CURVE_SPEED) || 110)
+  );
+  const DEFAULT_LINE_FOLLOW_SPEED = Math.min(
+    MAX_LOGICAL_SPEED,
+    Math.max(1, Number(navigationConfig.BASE_SPEED) || 85)
+  );
+  const DEFAULT_CORNER_ENTRY_SPEED = Math.min(
+    MAX_LOGICAL_SPEED,
+    Math.max(1, Number(navigationConfig.CORNER_ENTRY_SPEED) || 120)
+  );
 
   const settingsButton = document.getElementById("settingsButton");
   const settingsOverlay = document.getElementById("settingsOverlay");
@@ -818,10 +975,28 @@
   const settingsUpdateServerButton = document.getElementById("settingsUpdateServerButton");
   const settingsSaveStorageButton = document.getElementById("settingsSaveStorageButton");
 
+  const settingsAdvancedButton = document.getElementById("settingsAdvancedButton");
+  const advancedSettingsPanel = document.getElementById("advancedSettingsPanel");
+  const settingsAdvancedBackButton = document.getElementById("settingsAdvancedBackButton");
+  const settingsAdvancedCloseButton = document.getElementById("settingsAdvancedCloseButton");
+  const settingsRotateSpeed = document.getElementById("settingsRotateSpeed");
+  const settingsTurnSpeed = document.getElementById("settingsTurnSpeed");
+  const settingsLineFollowSpeed = document.getElementById("settingsLineFollowSpeed");
+  const settingsCornerEntrySpeed = document.getElementById("settingsCornerEntrySpeed");
+  const settingsAdvancedUpdateServerButton = document.getElementById("settingsAdvancedUpdateServerButton");
+  const settingsAdvancedSaveStorageButton = document.getElementById("settingsAdvancedSaveStorageButton");
+  const settingsAdvancedUpdateEsp32Button = document.getElementById("settingsAdvancedUpdateEsp32Button");
+
   const normalizeAngle = (value, fallback) => {
     const angle = Number(value);
     if (!Number.isFinite(angle)) return fallback;
     return Math.min(360, Math.max(1, Math.round(angle)));
+  };
+
+  const normalizeSpeed = (value, fallback, max = MAX_LOGICAL_SPEED) => {
+    const speed = Number(value);
+    if (!Number.isFinite(speed)) return Math.round(fallback);
+    return Math.min(max, Math.max(1, Math.round(speed)));
   };
 
   const readDebugState = () => {
@@ -840,8 +1015,23 @@
 
   const readStoredSettings = () => {
     try {
-      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      if (!raw) return null;
+      let raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+
+      // Tương thích với bản cũ: nếu chưa có key chính thức thì tự chuyển
+      // dữ liệu từ robot_settings_v1 sang robot_setting_official.
+      if (!raw) {
+        const legacyRaw = localStorage.getItem(LEGACY_SETTINGS_STORAGE_KEY);
+        if (legacyRaw) {
+          const legacyParsed = JSON.parse(legacyRaw);
+          if (legacyParsed && typeof legacyParsed === "object") {
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(legacyParsed));
+            localStorage.removeItem(LEGACY_SETTINGS_STORAGE_KEY);
+            return legacyParsed;
+          }
+        }
+        return null;
+      }
+
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch (_) {
@@ -867,9 +1057,78 @@
     if (persist) writeDebugState(value);
   };
 
+  const applyRuntimeSpeedSettings = ({ rotateSpeed, turnSpeed, lineFollowSpeed, cornerEntrySpeed }) => {
+    const normalizedLineSpeed = normalizeSpeed(
+      lineFollowSpeed,
+      DEFAULT_LINE_FOLLOW_SPEED
+    );
+    const normalizedTurnSpeed = normalizeSpeed(
+      turnSpeed,
+      DEFAULT_ADVANCED_TURN_SPEED
+    );
+    const normalizedRotateSpeed = normalizeSpeed(
+      rotateSpeed,
+      DEFAULT_ROTATE_SPEED
+    );
+    const normalizedCornerEntrySpeed = normalizeSpeed(
+      cornerEntrySpeed,
+      DEFAULT_CORNER_ENTRY_SPEED
+    );
+
+    // 1 giá trị tốc độ quay điều khiển cả profile quay bằng gyro.
+    // Giữ đúng tỉ lệ fast / medium / slow hiện tại để robot vẫn giảm tốc
+    // khi gần đạt góc mục tiêu.
+    navigationConfig.TURN_FAST_SPEED = normalizedRotateSpeed;
+    navigationConfig.TURN_MEDIUM_SPEED = Math.max(
+      1,
+      Math.round(normalizedRotateSpeed * (68 / 88))
+    );
+    navigationConfig.TURN_SLOW_SPEED = Math.max(
+      1,
+      Math.round(normalizedRotateSpeed * (48 / 88))
+    );
+
+    // Tốc độ rẽ = tốc độ nền khi cua gắt.
+    navigationConfig.MIN_CURVE_SPEED = normalizedTurnSpeed;
+
+    // Tốc độ bám line = tốc độ nền khi đường thẳng / ít cong.
+    navigationConfig.BASE_SPEED = normalizedLineSpeed;
+
+    // Tốc độ vào cua: lưu cho runtime/ESP32; có thể dùng để tinh chỉnh logic vào cua về sau.
+    navigationConfig.CORNER_ENTRY_SPEED = normalizedCornerEntrySpeed;
+
+    window.ROBOT_RUNTIME_SETTINGS = {
+      ...(window.ROBOT_RUNTIME_SETTINGS || {}),
+      rotateSpeed: normalizedRotateSpeed,
+      turnSpeed: normalizedTurnSpeed,
+      lineFollowSpeed: normalizedLineSpeed,
+      cornerEntrySpeed: normalizedCornerEntrySpeed
+    };
+
+    if (settingsRotateSpeed) settingsRotateSpeed.value = String(normalizedRotateSpeed);
+    if (settingsTurnSpeed) settingsTurnSpeed.value = String(normalizedTurnSpeed);
+    if (settingsLineFollowSpeed) settingsLineFollowSpeed.value = String(normalizedLineSpeed);
+    if (settingsCornerEntrySpeed) settingsCornerEntrySpeed.value = String(normalizedCornerEntrySpeed);
+
+    return {
+      rotateSpeed: normalizedRotateSpeed,
+      turnSpeed: normalizedTurnSpeed,
+      lineFollowSpeed: normalizedLineSpeed,
+      cornerEntrySpeed: normalizedCornerEntrySpeed
+    };
+  };
+
   const applyStoredSettings = () => {
     const saved = readStoredSettings();
-    if (!saved) return;
+
+    const speedSettings = applyRuntimeSpeedSettings({
+      rotateSpeed: saved?.rotateSpeed ?? DEFAULT_ROTATE_SPEED,
+      turnSpeed: saved?.advancedTurnSpeed ?? saved?.turnSpeed ?? DEFAULT_ADVANCED_TURN_SPEED,
+      lineFollowSpeed: saved?.lineFollowSpeed ?? DEFAULT_LINE_FOLLOW_SPEED,
+      cornerEntrySpeed: saved?.cornerEntrySpeed ?? DEFAULT_CORNER_ENTRY_SPEED
+    });
+
+    if (!saved) return speedSettings;
 
     if (settingsUTurnAngle) {
       settingsUTurnAngle.value = String(
@@ -898,14 +1157,39 @@
         }
       }
     }
+
+    return speedSettings;
   };
 
-  const collectSettings = () => ({
-    robot: Number(settingsRobotSelect?.value || robotSelect?.value || 1),
-    debugEnabled: Boolean(settingsDebugToggle?.checked ?? debugModeToggle?.checked),
-    uTurnAngle: normalizeAngle(settingsUTurnAngle?.value, DEFAULT_U_TURN_ANGLE),
-    turnAngle: normalizeAngle(settingsTurnAngle?.value, DEFAULT_TURN_ANGLE)
-  });
+  const collectSettings = () => {
+    const lineFollowSpeed = normalizeSpeed(
+      settingsLineFollowSpeed?.value,
+      DEFAULT_LINE_FOLLOW_SPEED
+    );
+    const turnSpeed = normalizeSpeed(
+      settingsTurnSpeed?.value,
+      DEFAULT_ADVANCED_TURN_SPEED
+    );
+    const rotateSpeed = normalizeSpeed(
+      settingsRotateSpeed?.value,
+      DEFAULT_ROTATE_SPEED
+    );
+    const cornerEntrySpeed = normalizeSpeed(
+      settingsCornerEntrySpeed?.value,
+      DEFAULT_CORNER_ENTRY_SPEED
+    );
+
+    return {
+      robot: Number(settingsRobotSelect?.value || robotSelect?.value || 1),
+      debugEnabled: Boolean(settingsDebugToggle?.checked ?? debugModeToggle?.checked),
+      uTurnAngle: normalizeAngle(settingsUTurnAngle?.value, DEFAULT_U_TURN_ANGLE),
+      turnAngle: normalizeAngle(settingsTurnAngle?.value, DEFAULT_TURN_ANGLE),
+      rotateSpeed,
+      advancedTurnSpeed: turnSpeed,
+      lineFollowSpeed,
+      cornerEntrySpeed
+    };
+  };
 
   const saveSettingsToStorage = () => {
     const data = collectSettings();
@@ -913,13 +1197,36 @@
     if (settingsUTurnAngle) settingsUTurnAngle.value = String(data.uTurnAngle);
     if (settingsTurnAngle) settingsTurnAngle.value = String(data.turnAngle);
 
+    applyRuntimeSpeedSettings({
+      rotateSpeed: data.rotateSpeed,
+      turnSpeed: data.advancedTurnSpeed,
+      lineFollowSpeed: data.lineFollowSpeed,
+      cornerEntrySpeed: data.cornerEntrySpeed
+    });
+
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(data));
       writeDebugState(data.debugEnabled);
-      alert("Đã lưu cài đặt vào localStorage.");
+      alert("Đã lưu cài đặt vào localStorage và áp dụng tốc độ cho phiên hiện tại.");
     } catch (_) {
       alert("Không thể lưu cài đặt vào localStorage trên trình duyệt này.");
     }
+  };
+
+  const showBasicSettings = ({ focus = true } = {}) => {
+    settingsPanel?.classList.remove("settings-subpanel-hidden");
+    settingsPanel?.setAttribute("aria-hidden", "false");
+    advancedSettingsPanel?.classList.add("settings-subpanel-hidden");
+    advancedSettingsPanel?.setAttribute("aria-hidden", "true");
+    if (focus) requestAnimationFrame(() => settingsAdvancedButton?.focus());
+  };
+
+  const showAdvancedSettings = () => {
+    settingsPanel?.classList.add("settings-subpanel-hidden");
+    settingsPanel?.setAttribute("aria-hidden", "true");
+    advancedSettingsPanel?.classList.remove("settings-subpanel-hidden");
+    advancedSettingsPanel?.setAttribute("aria-hidden", "false");
+    requestAnimationFrame(() => settingsAdvancedBackButton?.focus());
   };
 
   const openSettings = () => {
@@ -927,6 +1234,7 @@
     if (settingsRobotSelect && robotSelect) {
       settingsRobotSelect.value = robotSelect.value;
     }
+    showBasicSettings({ focus: false });
     settingsOverlay.classList.remove("settings-hidden");
     settingsOverlay.setAttribute("aria-hidden", "false");
     settingsButton?.setAttribute("aria-expanded", "true");
@@ -938,6 +1246,7 @@
     settingsOverlay.classList.add("settings-hidden");
     settingsOverlay.setAttribute("aria-hidden", "true");
     settingsButton?.setAttribute("aria-expanded", "false");
+    showBasicSettings({ focus: false });
     settingsButton?.focus();
   };
 
@@ -954,6 +1263,9 @@
 
   settingsButton?.addEventListener("click", openSettings);
   settingsCloseButton?.addEventListener("click", closeSettings);
+  settingsAdvancedCloseButton?.addEventListener("click", closeSettings);
+  settingsAdvancedButton?.addEventListener("click", showAdvancedSettings);
+  settingsAdvancedBackButton?.addEventListener("click", () => showBasicSettings());
 
   settingsOverlay?.addEventListener("click", (event) => {
     if (event.target === settingsOverlay) closeSettings();
@@ -975,11 +1287,54 @@
     if (settingsRobotSelect) settingsRobotSelect.value = robotSelect.value;
   });
 
-  settingsUpdateServerButton?.addEventListener("click", () => {
+  const showServerNotConnectedMessage = () => {
     alert("Update to Server: chức năng này chưa được kết nối logic server.");
-  });
+  };
 
+  const updateSettingsToEsp32 = () => {
+    const data = collectSettings();
+
+    applyRuntimeSpeedSettings({
+      rotateSpeed: data.rotateSpeed,
+      turnSpeed: data.advancedTurnSpeed,
+      lineFollowSpeed: data.lineFollowSpeed,
+      cornerEntrySpeed: data.cornerEntrySpeed
+    });
+
+    const robotNumber = Number(settingsRobotSelect?.value || robotSelect?.value || 1);
+    const mqttBridge = window.ROBOT_CONTROL?.mqttBridge;
+
+    if (!mqttBridge?.client || !mqttBridge?.connected) {
+      alert("Update to ESP32: MQTT chưa kết nối tới robot.");
+      return;
+    }
+
+    const payload = {
+      type: "runtime_settings",
+      rotate_speed: data.rotateSpeed,
+      turn_speed: data.advancedTurnSpeed,
+      line_follow_speed: data.lineFollowSpeed,
+      corner_entry_speed: data.cornerEntrySpeed,
+      ts: Date.now()
+    };
+
+    try {
+      mqttBridge.client.publish(
+        mqttBridge.topic(robotNumber, "settings"),
+        JSON.stringify(payload),
+        { qos: 0, retain: false }
+      );
+      alert("Đã gửi cài đặt tốc độ tới ESP32 qua MQTT.");
+    } catch (_) {
+      alert("Không thể gửi cài đặt tới ESP32.");
+    }
+  };
+
+  settingsUpdateServerButton?.addEventListener("click", showServerNotConnectedMessage);
+  settingsAdvancedUpdateServerButton?.addEventListener("click", showServerNotConnectedMessage);
   settingsSaveStorageButton?.addEventListener("click", saveSettingsToStorage);
+  settingsAdvancedSaveStorageButton?.addEventListener("click", saveSettingsToStorage);
+  settingsAdvancedUpdateEsp32Button?.addEventListener("click", updateSettingsToEsp32);
 })();
 </script>
 
