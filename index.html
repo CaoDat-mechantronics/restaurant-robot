@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20260930-manual-debug-1"
+    href="styles.css?v=20261001-settings-storage-1"
   >
 </head>
 
@@ -639,6 +639,49 @@
           <span class="switch-track" aria-hidden="true"><span></span></span>
         </label>
       </div>
+
+      <label class="settings-field settings-number-field">
+        <span>Góc quay đầu</span>
+        <div class="settings-number-control">
+          <input
+            id="settingsUTurnAngle"
+            type="number"
+            min="1"
+            max="360"
+            step="1"
+            value="180"
+            inputmode="numeric"
+            aria-label="Góc quay đầu"
+          >
+          <span>°</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field">
+        <span>Góc rẽ</span>
+        <div class="settings-number-control">
+          <input
+            id="settingsTurnAngle"
+            type="number"
+            min="1"
+            max="360"
+            step="1"
+            value="90"
+            inputmode="numeric"
+            aria-label="Góc rẽ"
+          >
+          <span>°</span>
+        </div>
+      </label>
+
+      <div class="settings-actions">
+        <button id="settingsUpdateServerButton" type="button">
+          Update to Server
+        </button>
+        <button id="settingsSaveStorageButton" type="button">
+          Save to Storage
+        </button>
+      </div>
     </div>
   </section>
 </div>
@@ -758,6 +801,9 @@
 <script>
 (() => {
   const DEBUG_STORAGE_KEY = "robot_debug_enabled";
+  const SETTINGS_STORAGE_KEY = "robot_settings_v1";
+  const DEFAULT_U_TURN_ANGLE = 180;
+  const DEFAULT_TURN_ANGLE = 90;
 
   const settingsButton = document.getElementById("settingsButton");
   const settingsOverlay = document.getElementById("settingsOverlay");
@@ -767,6 +813,16 @@
   const settingsDebugToggle = document.getElementById("settingsDebugToggle");
   const robotSelect = document.getElementById("robotSelect");
   const settingsRobotSelect = document.getElementById("settingsRobotSelect");
+  const settingsUTurnAngle = document.getElementById("settingsUTurnAngle");
+  const settingsTurnAngle = document.getElementById("settingsTurnAngle");
+  const settingsUpdateServerButton = document.getElementById("settingsUpdateServerButton");
+  const settingsSaveStorageButton = document.getElementById("settingsSaveStorageButton");
+
+  const normalizeAngle = (value, fallback) => {
+    const angle = Number(value);
+    if (!Number.isFinite(angle)) return fallback;
+    return Math.min(360, Math.max(1, Math.round(angle)));
+  };
 
   const readDebugState = () => {
     try {
@@ -780,6 +836,17 @@
     try {
       localStorage.setItem(DEBUG_STORAGE_KEY, enabled ? "1" : "0");
     } catch (_) {}
+  };
+
+  const readStoredSettings = () => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_) {
+      return null;
+    }
   };
 
   const applyDebugState = (enabled, persist = true) => {
@@ -798,6 +865,61 @@
     }
 
     if (persist) writeDebugState(value);
+  };
+
+  const applyStoredSettings = () => {
+    const saved = readStoredSettings();
+    if (!saved) return;
+
+    if (settingsUTurnAngle) {
+      settingsUTurnAngle.value = String(
+        normalizeAngle(saved.uTurnAngle, DEFAULT_U_TURN_ANGLE)
+      );
+    }
+
+    if (settingsTurnAngle) {
+      settingsTurnAngle.value = String(
+        normalizeAngle(saved.turnAngle, DEFAULT_TURN_ANGLE)
+      );
+    }
+
+    if (typeof saved.debugEnabled === "boolean") {
+      applyDebugState(saved.debugEnabled, false);
+    }
+
+    if (saved.robot != null) {
+      const robotValue = String(saved.robot);
+      const validRobot = ["1", "2"].includes(robotValue);
+      if (validRobot) {
+        if (settingsRobotSelect) settingsRobotSelect.value = robotValue;
+        if (robotSelect && robotSelect.value !== robotValue) {
+          robotSelect.value = robotValue;
+          robotSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      }
+    }
+  };
+
+  const collectSettings = () => ({
+    robot: Number(settingsRobotSelect?.value || robotSelect?.value || 1),
+    debugEnabled: Boolean(settingsDebugToggle?.checked ?? debugModeToggle?.checked),
+    uTurnAngle: normalizeAngle(settingsUTurnAngle?.value, DEFAULT_U_TURN_ANGLE),
+    turnAngle: normalizeAngle(settingsTurnAngle?.value, DEFAULT_TURN_ANGLE)
+  });
+
+  const saveSettingsToStorage = () => {
+    const data = collectSettings();
+
+    if (settingsUTurnAngle) settingsUTurnAngle.value = String(data.uTurnAngle);
+    if (settingsTurnAngle) settingsTurnAngle.value = String(data.turnAngle);
+
+    try {
+      localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(data));
+      writeDebugState(data.debugEnabled);
+      alert("Đã lưu cài đặt vào localStorage.");
+    } catch (_) {
+      alert("Không thể lưu cài đặt vào localStorage trên trình duyệt này.");
+    }
   };
 
   const openSettings = () => {
@@ -820,6 +942,7 @@
   };
 
   applyDebugState(readDebugState(), false);
+  applyStoredSettings();
 
   debugModeToggle?.addEventListener("change", () => {
     applyDebugState(debugModeToggle.checked);
@@ -851,6 +974,12 @@
   robotSelect?.addEventListener("change", () => {
     if (settingsRobotSelect) settingsRobotSelect.value = robotSelect.value;
   });
+
+  settingsUpdateServerButton?.addEventListener("click", () => {
+    alert("Update to Server: chức năng này chưa được kết nối logic server.");
+  });
+
+  settingsSaveStorageButton?.addEventListener("click", saveSettingsToStorage);
 })();
 </script>
 

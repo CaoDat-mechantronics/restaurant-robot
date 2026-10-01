@@ -2297,6 +2297,7 @@ body:not(.debug-mode-enabled) .debug-only {
 
 .settings-panel {
   width: min(390px, calc(100vw - 36px));
+  max-height: calc(100dvh - 94px);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: #0c1b2df5;
@@ -2340,7 +2341,9 @@ body:not(.debug-mode-enabled) .debug-only {
 .settings-content {
   display: grid;
   gap: 12px;
+  max-height: calc(100dvh - 166px);
   padding: 16px 18px 18px;
+  overflow-y: auto;
 }
 
 .settings-field,
@@ -2389,6 +2392,58 @@ body:not(.debug-mode-enabled) .debug-only {
   background: transparent;
 }
 
+.settings-number-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.settings-number-control input {
+  width: 92px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--text);
+  background: #07111f;
+  font: inherit;
+  text-align: right;
+}
+
+.settings-number-control > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-actions button {
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 9px 10px;
+  background: #10233a;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-actions button:hover {
+  border-color: #58a8ff;
+  background: #143052;
+}
+
+.settings-actions button:active {
+  transform: translateY(1px);
+}
+
 @media (max-width: 820px) {
   .top-icon-button {
     width: 36px;
@@ -2428,6 +2483,12 @@ body:not(.debug-mode-enabled) .debug-only {
 
   .settings-panel {
     width: min(100%, 430px);
+  }
+}
+
+@media (max-width: 480px) {
+  .settings-actions {
+    grid-template-columns: 1fr;
   }
 }
 
