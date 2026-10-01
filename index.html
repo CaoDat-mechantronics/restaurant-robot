@@ -527,16 +527,17 @@
           <div class="manual-control-head">
             <div>
               <b>Điều khiển chuyển động manual</b>
-              <small>Điều khiển trực tiếp để test robot. Khi dùng quay manual, bám line tự động sẽ tạm dừng.</small>
+              <small>Điều khiển trực tiếp để test robot. Khi dùng quay hoặc rẽ manual, bám line tự động sẽ tạm dừng.</small>
             </div>
             <span id="manualControlState" class="manual-control-state">Sẵn sàng</span>
           </div>
 
+          <div class="manual-control-group-label">Quay tại chỗ</div>
           <div class="manual-turn-grid">
             <div class="manual-turn-row">
               <button id="manualTurnLeftButton" type="button" class="ghost manual-action-button">↶ Quay trái</button>
               <label class="manual-angle-field">
-                <input id="manualTurnLeftAngle" type="number" min="1" max="360" step="1" value="90" inputmode="numeric">
+                <input id="manualTurnLeftAngle" type="number" min="1" max="360" step="1" value="90" inputmode="numeric" aria-label="Góc quay trái">
                 <span>°</span>
               </label>
             </div>
@@ -544,7 +545,26 @@
             <div class="manual-turn-row">
               <button id="manualTurnRightButton" type="button" class="ghost manual-action-button">Quay phải ↷</button>
               <label class="manual-angle-field">
-                <input id="manualTurnRightAngle" type="number" min="1" max="360" step="1" value="90" inputmode="numeric">
+                <input id="manualTurnRightAngle" type="number" min="1" max="360" step="1" value="90" inputmode="numeric" aria-label="Góc quay phải">
+                <span>°</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="manual-control-group-label manual-control-group-label-spaced">Rẽ khi xe đang tiến</div>
+          <div class="manual-turn-grid manual-steer-grid">
+            <div class="manual-turn-row">
+              <button id="manualSteerLeftButton" type="button" class="ghost manual-action-button">↰ Rẽ trái</button>
+              <label class="manual-angle-field">
+                <input id="manualSteerLeftAngle" type="number" min="1" max="180" step="1" value="90" inputmode="numeric" aria-label="Góc rẽ trái">
+                <span>°</span>
+              </label>
+            </div>
+
+            <div class="manual-turn-row">
+              <button id="manualSteerRightButton" type="button" class="ghost manual-action-button">Rẽ phải ↱</button>
+              <label class="manual-angle-field">
+                <input id="manualSteerRightAngle" type="number" min="1" max="180" step="1" value="90" inputmode="numeric" aria-label="Góc rẽ phải">
                 <span>°</span>
               </label>
             </div>
@@ -898,13 +918,13 @@
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 
 <script src="audio.js?v=20260930-audioworklet-2"></script>
-<script src="gemini-live.js?v=20260930-default-vad-restore-1"></script>
+<script src="gemini-live.js?v=20261001-live-reconnect-vad-1"></script>
 <script src="mqtt-robot.js?v=20260930-audioworklet-1"></script>
 <script src="orientation.js?v=20260930-audioworklet-1"></script>
 <script src="vision.js?v=20260930-audioworklet-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20260930-manual-debug-1"></script>
+<script src="robot-control.js?v=20261001-manual-steer-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL

@@ -23,6 +23,15 @@ class GeminiRobotLive {
     this.ready = false;
     this.mic = false;
 
+    // Trạng thái phiên Live. Gemini có thể chủ động reset WebSocket; giữ
+    // session handle + tự reconnect để mic không "chết" sau lỗi 1011/GoAway.
+    this.sessionHandle = "";
+    this.wantMic = false;
+    this.intentionalClose = false;
+    this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 4;
+
     // Kết quả check-food gần nhất. prepare_delivery chỉ được tạo từ dữ liệu này.
     this.lastFoodCheck = null;
 
@@ -178,16 +187,24 @@ QUY TẮC BẮT BUỘC:
     }
 
     if (this.socket) {
+      // Bỏ handler của socket cũ để việc thay socket không kích hoạt reconnect
+      // ngoài ý muốn.
+      const oldSocket = this.socket;
+      oldSocket.onclose = null;
+      oldSocket.onerror = null;
       try {
-        this.socket.close();
+        oldSocket.close(1000, "replace socket");
       } catch (_) {}
 
       this.socket = null;
       this.ready = false;
     }
 
+    this.intentionalClose = false;
     this.onState("connecting");
 
+    // Luôn xin ephemeral token MỚI cho mỗi lần mở WebSocket. Nếu token đăng
+    // nhập backend đã hết hạn, getGeminiToken() ở app.js sẽ trả 401 rõ ràng.
     const info = await this.getToken();
 
     if (!info?.token) {
@@ -287,6 +304,32 @@ QUY TẮC BẮT BUỘC:
             tools:
               this.tools(),
 
+            // Cấu hình VAD rõ ràng để server chốt lượt nói nhanh hơn thay vì
+            // phụ thuộc hoàn toàn vào default (dễ kẹt ACTIVITY_START trong môi
+            // trường có tiếng ồn nền).
+            realtimeInputConfig: {
+              automaticActivityDetection: {
+                disabled: false,
+                startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+                endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+                prefixPaddingMs: 250,
+                silenceDurationMs: 500
+              },
+              activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
+              turnCoverage: "TURN_INCLUDES_ONLY_ACTIVITY"
+            },
+
+            // Bật session resumption. Khi reconnect sau 1011/GoAway, dùng
+            // handle gần nhất để giữ hội thoại nếu Gemini cho phép resume.
+            sessionResumption: this.sessionHandle
+              ? { handle: this.sessionHandle }
+              : {},
+
+            // Tránh phiên audio dài bị chạm giới hạn context.
+            contextWindowCompression: {
+              slidingWindow: {}
+            },
+
             inputAudioTranscription: {},
 
             outputAudioTranscription: {}
@@ -346,12 +389,15 @@ QUY TẮC BẮT BUỘC:
 
           this.ready = true;
 
+          this.reconnectAttempts = 0;
+
           this.onState(
-            "ready"
+            this.mic ? "listening" : "ready"
           );
 
           this.onDebug(
-            "Gemini setupComplete ✓"
+            "Gemini setupComplete ✓" +
+            (this.sessionHandle ? " (session resumable)" : "")
           );
 
           resolveOnce();
@@ -377,11 +423,11 @@ QUY TẮC BẮT BUỘC:
         clearTimeout(setupTimer);
 
         this.ready = false;
+        this.onDebug("Gemini WebSocket error event.");
 
-        this.onState(
-          "error"
-        );
-
+        // onclose thường chạy ngay sau onerror và chứa code/reason hữu ích hơn.
+        // Chỉ reject ngay nếu setup chưa hoàn tất; nếu phiên đang chạy thì
+        // onclose sẽ đảm nhiệm việc reconnect.
         rejectOnce(
           new Error(
             "Gemini WebSocket error."
@@ -398,18 +444,15 @@ QUY TẮC BẮT BUỘC:
 
         const wasReady =
           this.ready;
+        const shouldReconnect =
+          !this.intentionalClose &&
+          (this.wantMic || this.mic);
 
         this.ready = false;
-        this.mic = false;
-
-        this.audio.stop();
+        this.audio.stopPlayback();
 
         this.onDebug(
           `CLOSE ${event.code} ${event.reason || ""}`
-        );
-
-        this.onState(
-          "closed"
         );
 
         if (!wasReady) {
@@ -419,6 +462,19 @@ QUY TẮC BẮT BUỘC:
               `${event.code} ${event.reason || ""}`
             )
           );
+        }
+
+        if (shouldReconnect) {
+          // Không tắt MediaStream: callback mic sẽ tự bỏ chunk trong lúc
+          // ready=false và gửi tiếp ngay sau khi socket mới setupComplete.
+          this.onState("connecting");
+          this.scheduleReconnect(
+            `close ${event.code} ${event.reason || ""}`
+          );
+        } else {
+          this.mic = false;
+          this.audio.stop();
+          this.onState("closed");
         }
       };
     });
@@ -512,14 +568,20 @@ QUY TẮC BẮT BUỘC:
         "GO_AWAY " +
         JSON.stringify(message.goAway)
       );
+      // Không đóng socket ngay: Gemini sẽ đóng sau timeLeft. onclose sẽ
+      // reconnect bằng handle mới nhất để tránh mất lượt đang xử lý.
     }
 
     if (message.sessionResumptionUpdate) {
+      const update = message.sessionResumptionUpdate;
+
+      if (update.resumable && update.newHandle) {
+        this.sessionHandle = String(update.newHandle);
+      }
+
       this.onDebug(
         "SESSION_RESUMPTION " +
-        JSON.stringify(
-          message.sessionResumptionUpdate
-        )
+        JSON.stringify(update)
       );
     }
   }
@@ -728,11 +790,74 @@ QUY TẮC BẮT BUỘC:
   }
 
   // =========================================================
+  // AUTO RECONNECT GEMINI LIVE
+  // =========================================================
+
+  scheduleReconnect(reason = "socket closed") {
+    if (this.intentionalClose || (!this.wantMic && !this.mic)) {
+      return;
+    }
+
+    if (this.reconnectTimer) {
+      return;
+    }
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.onDebug(
+        `Gemini reconnect failed after ${this.reconnectAttempts} attempts.`
+      );
+      this.wantMic = false;
+      this.mic = false;
+      this.audio.stop();
+      this.onState("error");
+      return;
+    }
+
+    const delays = [300, 800, 1500, 3000];
+    const attempt = this.reconnectAttempts + 1;
+    const delay = delays[Math.min(this.reconnectAttempts, delays.length - 1)];
+    this.reconnectAttempts = attempt;
+
+    this.onDebug(
+      `Gemini reconnect #${attempt} in ${delay}ms (${reason})`
+    );
+
+    this.reconnectTimer = window.setTimeout(async () => {
+      this.reconnectTimer = null;
+
+      try {
+        await this.connect();
+        this.onDebug(`Gemini reconnect #${attempt} ✓`);
+        this.onState(this.mic ? "listening" : "ready");
+      } catch (error) {
+        this.onDebug(
+          `Gemini reconnect #${attempt} failed: ${error.message}`
+        );
+
+        // Nếu handle cũ không còn hợp lệ, lần kế tiếp mở session mới.
+        if (attempt >= 2) {
+          this.sessionHandle = "";
+        }
+
+        this.scheduleReconnect(error.message);
+      }
+    }, delay);
+  }
+
+  // =========================================================
   // START MICROPHONE
   // =========================================================
 
   async startMic() {
-    await this.connect();
+    this.wantMic = true;
+    this.intentionalClose = false;
+
+    try {
+      await this.connect();
+    } catch (error) {
+      this.wantMic = false;
+      throw error;
+    }
 
     if (this.mic) {
       return;
@@ -789,6 +914,13 @@ QUY TẮC BẮT BUỘC:
   // =========================================================
 
   stopMic() {
+    this.wantMic = false;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (!this.mic) {
       return;
     }
@@ -905,6 +1037,14 @@ QUY TẮC BẮT BUỘC:
   // =========================================================
 
   close() {
+    this.intentionalClose = true;
+    this.wantMic = false;
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
     if (this.mic) {
       this.stopMic();
     }
@@ -928,6 +1068,9 @@ QUY TẮC BẮT BUỘC:
 
     this.mic =
       false;
+
+    this.sessionHandle = "";
+    this.reconnectAttempts = 0;
   }
 }
 

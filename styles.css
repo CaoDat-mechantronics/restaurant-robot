@@ -2706,10 +2706,28 @@ body:not(.debug-mode-enabled) .debug-only {
   background: #2d1017;
 }
 
+.manual-control-group-label {
+  margin: 2px 0 7px;
+  color: #a9bed2;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.manual-control-group-label-spaced {
+  margin-top: 12px;
+}
+
 .manual-turn-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.manual-steer-grid .manual-action-button {
+  border-color: #31577c;
+  background: #10233a;
 }
 
 .manual-turn-row {

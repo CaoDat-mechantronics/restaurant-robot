@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-09-27-4motor-mqtt-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-01-manual-steer-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -1027,6 +1027,109 @@
     );
   }
 
+  async function manualSteer(direction, rawAngle) {
+    const targetAngle = Math.max(1, Math.min(180, Number(rawAngle) || 90));
+    const dir = direction === "LEFT" ? "LEFT" : "RIGHT";
+
+    if (!mqttBridge.connected) {
+      setManualControlState("MQTT chưa kết nối", "bad");
+      setMessage("Không thể rẽ manual: MQTT WebSocket chưa connected.", true);
+      return;
+    }
+
+    cancelManualTurn({ stopMotor: true });
+    stopNavigationForManual(`manual steer ${dir.toLowerCase()}`);
+
+    const startYaw = await waitForYaw();
+    if (startYaw == null) {
+      setManualControlState("Chưa có dữ liệu gyro", "bad");
+      setMessage("Không thể rẽ theo góc vì chưa đọc được yaw. Hãy bấm Cho phép Gyro/Camera.", true);
+      return;
+    }
+
+    const maxLogical = Math.max(1, Number(navConfig.MAX_SPEED) || 155);
+    const clampSpeed = (value, fallback) =>
+      Math.max(1, Math.min(maxLogical, Math.round(Number(value) || fallback)));
+
+    // Rẽ manual là cua theo cung: cả hai bánh vẫn chạy tiến.
+    // Bánh ngoài lấy tốc độ vào cua, bánh trong lấy tốc độ rẽ.
+    const outerBase = clampSpeed(navConfig.CORNER_ENTRY_SPEED, 120);
+    const requestedInner = clampSpeed(navConfig.MIN_CURVE_SPEED, 110);
+    const innerBase = Math.max(1, Math.min(requestedInner, outerBase - 5));
+
+    const token = ++controlState.manualTurnToken;
+    const startedAt = performance.now();
+    const timeoutMs = Math.max(15000, targetAngle * 300);
+    const tolerance = Math.max(
+      0.8,
+      Number(navConfig.TURN_TARGET_TOLERANCE_DEG) || 2
+    );
+
+    setManualControlState(`Đang rẽ ${dir === "LEFT" ? "trái" : "phải"} 0/${targetAngle}°`, "warn");
+    setMessage(
+      `Manual: đang rẽ ${dir === "LEFT" ? "trái" : "phải"} ${targetAngle}° ` +
+      `(bánh trong ${innerBase}, bánh ngoài ${outerBase}).`
+    );
+    log(
+      `MANUAL STEER ${dir} target=${targetAngle} startYaw=${Number(startYaw).toFixed(1)} ` +
+      `inner=${innerBase} outer=${outerBase}`
+    );
+
+    const tick = () => {
+      if (token !== controlState.manualTurnToken) return;
+
+      const yaw = orientation.getYaw();
+      if (yaw == null) {
+        cancelManualTurn({ stopMotor: true });
+        setManualControlState("Mất dữ liệu gyro", "bad");
+        setMessage("Manual steer đã dừng vì mất dữ liệu yaw.", true);
+        return;
+      }
+
+      const turned = Math.abs(
+        window.RobotOrientation.deltaDegrees(yaw, startYaw)
+      );
+
+      if (turned >= Math.max(0, targetAngle - tolerance)) {
+        cancelManualTurn({ stopMotor: true });
+        setManualControlState(`Rẽ xong ${turned.toFixed(1)}°`, "good");
+        setMessage(`Manual: đã rẽ ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}°.`);
+        log(`MANUAL STEER DONE ${dir} angle=${turned.toFixed(1)}`);
+        return;
+      }
+
+      if (performance.now() - startedAt > timeoutMs) {
+        cancelManualTurn({ stopMotor: true });
+        setManualControlState("Timeout", "bad");
+        setMessage(`Manual steer timeout trước khi đạt ${targetAngle}°.`, true);
+        log(`MANUAL STEER TIMEOUT ${dir} angle=${turned.toFixed(1)}/${targetAngle}`);
+        return;
+      }
+
+      const remaining = Math.max(0, targetAngle - turned);
+      const factor = remaining <= 10 ? 0.65 : remaining <= 25 ? 0.82 : 1;
+      const outer = Math.max(1, Math.round(outerBase * factor));
+      const inner = Math.max(1, Math.min(Math.round(innerBase * factor), outer - 3));
+
+      if (dir === "LEFT") {
+        navigation.sendMotor(inner, outer, true);
+      } else {
+        navigation.sendMotor(outer, inner, true);
+      }
+
+      setManualControlState(
+        `Đang rẽ ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}/${targetAngle}°`,
+        "warn"
+      );
+    };
+
+    tick();
+    controlState.manualTurnTimer = window.setInterval(
+      tick,
+      Math.max(35, Number(navConfig.MOTOR_INTERVAL_MS) || 40)
+    );
+  }
+
   async function manualLineFollow() {
     if (!mqttBridge.connected) {
       setManualControlState("MQTT chưa kết nối", "bad");
@@ -1241,12 +1344,31 @@
     }
   });
 
+  try {
+    const rawSettings = localStorage.getItem("robot_setting_official");
+    const savedSettings = rawSettings ? JSON.parse(rawSettings) : null;
+    const savedTurnAngle = Math.max(
+      1,
+      Math.min(180, Number(savedSettings?.turnAngle) || 90)
+    );
+    if ($("manualSteerLeftAngle")) $("manualSteerLeftAngle").value = String(savedTurnAngle);
+    if ($("manualSteerRightAngle")) $("manualSteerRightAngle").value = String(savedTurnAngle);
+  } catch (_) {}
+
   $("manualTurnLeftButton")?.addEventListener("click", () => {
     manualTurn("LEFT", $("manualTurnLeftAngle")?.value);
   });
 
   $("manualTurnRightButton")?.addEventListener("click", () => {
     manualTurn("RIGHT", $("manualTurnRightAngle")?.value);
+  });
+
+  $("manualSteerLeftButton")?.addEventListener("click", () => {
+    manualSteer("LEFT", $("manualSteerLeftAngle")?.value);
+  });
+
+  $("manualSteerRightButton")?.addEventListener("click", () => {
+    manualSteer("RIGHT", $("manualSteerRightAngle")?.value);
   });
 
   $("manualLineFollowButton")?.addEventListener("click", () => {
@@ -1311,6 +1433,7 @@
     stop: stopEverything,
     preparePermissions,
     manualTurn,
+    manualSteer,
     manualLineFollow,
     manualStop
   };
