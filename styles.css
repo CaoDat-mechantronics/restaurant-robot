@@ -461,11 +461,78 @@ body {
 
 
 /* =========================================================
+   ROBOT PRIMARY ACTIONS
+   ========================================================= */
+
+.robot-primary-actions {
+  align-self: end;
+  width: min(680px, 96%);
+  display: grid;
+  grid-template-columns: minmax(112px, 1fr) auto minmax(112px, 1fr);
+  align-items: center;
+  gap: 22px;
+}
+
+.robot-primary-actions .command {
+  justify-self: center;
+}
+
+.robot-side-action {
+  min-height: 58px;
+  padding: 11px 14px;
+  border: 1px solid #31577c;
+  border-radius: 14px;
+  background: #10233a;
+  color: var(--text);
+  box-shadow: 0 10px 26px #0004;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font: inherit;
+}
+
+.robot-side-action strong {
+  font-size: 13px;
+  letter-spacing: .05em;
+}
+
+.robot-side-action small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.robot-start-action {
+  border-color: #1e98b5;
+  background: linear-gradient(180deg, #17647a, #10465b);
+  color: #effcff;
+}
+
+.robot-start-action.active {
+  box-shadow: 0 0 0 4px #5de7ff12, 0 10px 26px #0004;
+}
+
+.robot-side-action:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.robot-side-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.robot-side-action:disabled {
+  cursor: default;
+  opacity: .68;
+}
+
+/* =========================================================
    COMMAND BUTTON
    ========================================================= */
 
 .command {
-  align-self: end;
+  align-self: center;
 
   width: 154px;
   height: 154px;
@@ -1293,6 +1360,28 @@ pre {
 }
 
 
+@media (max-width: 680px) {
+  .robot-primary-actions {
+    width: 100%;
+    grid-template-columns: minmax(78px, 1fr) auto minmax(78px, 1fr);
+    gap: 10px;
+  }
+
+  .robot-side-action {
+    min-height: 52px;
+    padding: 8px 7px;
+    border-radius: 12px;
+  }
+
+  .robot-side-action strong {
+    font-size: 11px;
+  }
+
+  .robot-side-action small {
+    font-size: 9px;
+  }
+}
+
 /* =========================================================
    SMALL PHONE
    ========================================================= */
@@ -1395,6 +1484,26 @@ pre {
 /* =========================================================
    VERY SMALL PHONE
    ========================================================= */
+
+@media (max-width: 360px) {
+  .robot-primary-actions {
+    grid-template-columns: minmax(66px, 1fr) auto minmax(66px, 1fr);
+    gap: 6px;
+  }
+
+  .robot-side-action {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .robot-side-action strong {
+    font-size: 10px;
+  }
+
+  .robot-side-action small {
+    display: none;
+  }
+}
 
 @media (max-width: 360px) {
 

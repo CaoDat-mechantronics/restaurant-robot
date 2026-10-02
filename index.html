@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20261001-settings-storage-1"
+    href="styles.css?v=20261002-official-route-start-1"
   >
 </head>
 
@@ -175,28 +175,48 @@
       </div>
 
 
-      <!-- COMMAND BUTTON -->
-      <button
-        id="commandButton"
-        class="command"
-      >
+      <!-- ROBOT PRIMARY ACTIONS -->
+      <div class="robot-primary-actions">
+        <button
+          id="robotStartButton"
+          class="robot-side-action robot-start-action"
+          type="button"
+        >
+          <strong>BẮT ĐẦU</strong>
+          <small>Chạy nhiệm vụ</small>
+        </button>
 
-        <span class="finger">
-          <i></i>
-          <i></i>
-          <i></i>
-          <i></i>
-        </span>
+        <button
+          id="commandButton"
+          class="command"
+        >
 
-        <strong>
-          NHẬN LỆNH
-        </strong>
+          <span class="finger">
+            <i></i>
+            <i></i>
+            <i></i>
+            <i></i>
+          </span>
 
-        <small>
-          Bật Gemini Live
-        </small>
+          <strong>
+            NHẬN LỆNH
+          </strong>
 
-      </button>
+          <small>
+            Bật Gemini Live
+          </small>
+
+        </button>
+
+        <button
+          id="robotSupportButton"
+          class="robot-side-action robot-support-action"
+          type="button"
+        >
+          <strong>HỖ TRỢ</strong>
+          <small>Trợ giúp</small>
+        </button>
+      </div>
 
       <!-- CAMERA: chỉ cho điều khiển khi robot đang ON TASK -->
       <div class="camera-action-row">
@@ -935,7 +955,7 @@
 <script src="vision.js?v=20260930-audioworklet-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261002-web2-turn-protocol-1"></script>
+<script src="robot-control.js?v=20261002-official-route-start-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
