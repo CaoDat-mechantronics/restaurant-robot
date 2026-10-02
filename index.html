@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20261002-official-route-start-1"
+    href="styles.css?v=20261002-camera-debug-visible-2"
   >
 </head>
 
@@ -175,6 +175,27 @@
       </div>
 
 
+      <!-- CAMERA DEBUG: dùng được kể cả khi robot DISCONNECTED; debug-only vẫn phụ thuộc Chế độ Debug -->
+      <div class="camera-action-row">
+        <button
+          id="cameraDebugButton"
+          class="camera-debug-button ghost debug-only"
+          type="button"
+        >
+          DEBUG CAMERA
+        </button>
+
+        <button
+          id="cameraSwitchButton"
+          class="camera-switch-button ghost debug-only"
+          type="button"
+          title="Chuyển sang camera sau"
+        >
+          CAMERA SAU
+        </button>
+      </div>
+
+
       <!-- ROBOT PRIMARY ACTIONS -->
       <div class="robot-primary-actions">
         <button
@@ -215,26 +236,6 @@
         >
           <strong>HỖ TRỢ</strong>
           <small>Trợ giúp</small>
-        </button>
-      </div>
-
-      <!-- CAMERA DEBUG: dùng được kể cả khi robot DISCONNECTED; debug-only vẫn phụ thuộc Chế độ Debug -->
-      <div class="camera-action-row">
-        <button
-          id="cameraDebugButton"
-          class="camera-debug-button ghost debug-only"
-          type="button"
-        >
-          DEBUG CAMERA
-        </button>
-
-        <button
-          id="cameraSwitchButton"
-          class="camera-switch-button ghost debug-only"
-          type="button"
-          title="Chuyển sang camera sau"
-        >
-          CAMERA SAU
         </button>
       </div>
 
@@ -953,7 +954,7 @@
 <script src="vision.js?v=20260930-audioworklet-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261002-camera-debug-always-1"></script>
+<script src="robot-control.js?v=20261002-camera-debug-visible-2"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL

@@ -2951,3 +2951,31 @@ body:not(.debug-mode-enabled) .debug-only {
     max-width: none;
   }
 }
+
+/* =========================================================
+   CAMERA DEBUG VISIBILITY FIX
+   Khi Debug Mode bật, nút camera phải luôn hiển thị kể cả robot disconnected.
+   Đặt hàng nút trước cụm BẮT ĐẦU/NHẬN LỆNH/HỖ TRỢ để không bị đẩy xuống
+   ngoài viewport trên điện thoại.
+   ========================================================= */
+body.debug-mode-enabled .camera-action-row {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+body.debug-mode-enabled #cameraDebugButton,
+body.debug-mode-enabled #cameraSwitchButton {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 820px) {
+  body.debug-mode-enabled .camera-action-row {
+    margin-top: 2px;
+    margin-bottom: -2px;
+  }
+}
