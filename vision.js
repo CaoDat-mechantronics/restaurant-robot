@@ -218,6 +218,69 @@
       this.overlayCtx.clearRect(0, 0, this.overlay.width, this.overlay.height);
     }
 
+    drawQrOverlay(qr) {
+      if (!this.overlay || !this.overlayCtx || !qr) {
+        return;
+      }
+
+      const corners = Array.isArray(qr.corners) ? qr.corners : [];
+      if (corners.length < 4) {
+        return;
+      }
+
+      const sourceWidth = Math.max(1, Number(qr.frameWidth) || this.qrCanvas.width || 1);
+      const sourceHeight = Math.max(1, Number(qr.frameHeight) || this.qrCanvas.height || 1);
+      const scaleX = this.overlay.width / sourceWidth;
+      const scaleY = this.overlay.height / sourceHeight;
+      const points = corners.map((point) => ({
+        x: (Number(point.x) || 0) * scaleX,
+        y: (Number(point.y) || 0) * scaleY
+      }));
+
+      const ctx = this.overlayCtx;
+      ctx.save();
+
+      // Vùng QR: viền đỏ rõ + lớp nền đỏ trong suốt.
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255, 0, 0, 0.10)";
+      ctx.fill();
+      ctx.strokeStyle = "#ff2d2d";
+      ctx.lineWidth = 4;
+      ctx.lineJoin = "round";
+      ctx.stroke();
+
+      // Chấm 4 góc giúp debug chính xác vùng QR detector trả về.
+      ctx.fillStyle = "#ff2d2d";
+      for (const point of points) {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Nhãn QR + diện tích ở ngay phía trên vùng phát hiện.
+      const minX = Math.min(...points.map((point) => point.x));
+      const minY = Math.min(...points.map((point) => point.y));
+      const label = `${String(qr.text || "QR")} · ${Number(qr.areaPercent || 0).toFixed(2)}%`;
+      ctx.font = "bold 18px system-ui, sans-serif";
+      ctx.textBaseline = "bottom";
+      const metrics = ctx.measureText(label);
+      const paddingX = 7;
+      const labelHeight = 27;
+      const labelX = Math.max(0, Math.min(this.overlay.width - metrics.width - paddingX * 2, minX));
+      const labelBottom = Math.max(labelHeight, minY - 6);
+      ctx.fillStyle = "rgba(255, 0, 0, 0.88)";
+      ctx.fillRect(labelX, labelBottom - labelHeight, metrics.width + paddingX * 2, labelHeight);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(label, labelX + paddingX, labelBottom - 4);
+
+      ctx.restore();
+    }
+
     stop() {
       this.running = false;
 
@@ -260,10 +323,13 @@
       const sourceHeight = this.video.videoHeight || 720;
       this.syncDisplayAspectRatio(sourceWidth, sourceHeight);
 
-      // Không còn detect/vẽ line. Camera chỉ dùng để quét QR.
+      // Không còn detect/vẽ line. Overlay chỉ dùng để khoanh vùng QR.
       this.clearOverlay();
 
       const now = performance.now();
+      if (this.lastQr && now - Number(this.lastQr.timestamp || 0) <= 700) {
+        this.drawQrOverlay(this.lastQr);
+      }
       const qrInterval = Math.max(
         120,
         Number(this.config.QR_SCAN_INTERVAL_MS) || 220
@@ -429,7 +495,10 @@
         if (text) {
           const payload = this.buildQrPayload(text, corners);
           this.lastQr = payload;
+          this.drawQrOverlay(payload);
           this.onQr(payload);
+        } else {
+          this.lastQr = null;
         }
       } catch (error) {
         this.onDebug(`QR scan error: ${error.message}`);
@@ -447,7 +516,7 @@
     }
   }
 
-  window.ROBOT_VISION_BUILD = "2026-10-02-qr-only-v1";
+  window.ROBOT_VISION_BUILD = "2026-10-02-qr-red-overlay-v1";
   console.info("[RobotVision] loaded", window.ROBOT_VISION_BUILD);
   window.RobotVision = RobotVision;
 })();
