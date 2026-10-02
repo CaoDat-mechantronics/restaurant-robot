@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-02-official-route-task-cache-v2";
+  window.ROBOT_CONTROL_BUILD = "2026-10-02-camera-debug-always-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -123,34 +123,25 @@
       : "Chuyển sang camera sau";
   }
 
-  function setDebugAvailability(isOnTask) {
+  // Camera debug là công cụ local của điện thoại/trình duyệt nên luôn cho phép
+  // sử dụng trong Debug Mode, kể cả khi ESP32/robot đang DISCONNECTED.
+  function setDebugAvailability(_isOnTask) {
     const debugButton = $("cameraDebugButton");
     if (debugButton) {
-      debugButton.hidden = !isOnTask;
-      debugButton.disabled = !isOnTask;
+      debugButton.hidden = false;
+      debugButton.disabled = false;
     }
 
     const switchButton = $("cameraSwitchButton");
     if (switchButton) {
-      switchButton.hidden = !isOnTask;
-      switchButton.disabled = !isOnTask;
+      switchButton.hidden = false;
+      switchButton.disabled = false;
     }
 
-    if (isOnTask) {
-      updateCameraSwitchButton();
-    }
-
-    if (!isOnTask) {
-      closeCameraDebug();
-    }
+    updateCameraSwitchButton();
   }
 
   function openCameraDebug() {
-    if (controlState.robotStatus !== "on_task") {
-      setMessage("Debug camera chỉ mở khi robot đang ON TASK.", true);
-      return;
-    }
-
     const panel = $("cameraDebugPanel");
     if (!panel) return;
 
@@ -2008,7 +1999,7 @@
 
     controlState.robot = next;
     controlState.robotStatus = "disconnected";
-    setDebugAvailability(false);
+    setDebugAvailability(true);
     controlState.pendingDelivery = null;
     controlState.currentDispatch = null;
     controlState.navigationStarting = false;
@@ -2045,7 +2036,7 @@
     const robotData = event.detail?.robotData || {};
 
     controlState.robotStatus = status;
-    setDebugAvailability(status === "on_task");
+    setDebugAvailability(true);
 
     // Backend có thể vẫn trả tasks ngay cả khi trường status đang là
     // disconnected (đúng như ảnh/log hiện tại). Vì vậy không được chỉ lưu task
@@ -2084,11 +2075,6 @@
       return;
     }
 
-    if (controlState.robotStatus !== "on_task") {
-      setDebugAvailability(false);
-      return;
-    }
-
     const ok = await ensureDebugCamera();
     if (ok) {
       openCameraDebug();
@@ -2098,11 +2084,6 @@
   $("cameraDebugCloseButton")?.addEventListener("click", closeCameraDebug);
 
   $("cameraSwitchButton")?.addEventListener("click", async () => {
-    if (controlState.robotStatus !== "on_task") {
-      setMessage("Chỉ đổi camera khi robot đang ON TASK.", true);
-      return;
-    }
-
     const button = $("cameraSwitchButton");
     if (button) {
       button.disabled = true;
@@ -2133,7 +2114,7 @@
     }
     finally {
       if (button) {
-        button.disabled = controlState.robotStatus !== "on_task";
+        button.disabled = false;
       }
     }
   });
@@ -2226,7 +2207,7 @@
   });
 
   async function boot() {
-    setDebugAvailability(false);
+    setDebugAvailability(true);
     setManualAngleDisplay(0, 0);
     setManualControlState("Sẵn sàng");
     updateSensorUi();

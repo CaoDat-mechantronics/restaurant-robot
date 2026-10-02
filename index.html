@@ -218,12 +218,11 @@
         </button>
       </div>
 
-      <!-- CAMERA: chỉ cho điều khiển khi robot đang ON TASK -->
+      <!-- CAMERA DEBUG: dùng được kể cả khi robot DISCONNECTED; debug-only vẫn phụ thuộc Chế độ Debug -->
       <div class="camera-action-row">
         <button
           id="cameraDebugButton"
           class="camera-debug-button ghost debug-only"
-          hidden
           type="button"
         >
           DEBUG CAMERA
@@ -231,8 +230,7 @@
 
         <button
           id="cameraSwitchButton"
-          class="camera-switch-button ghost"
-          hidden
+          class="camera-switch-button ghost debug-only"
           type="button"
           title="Chuyển sang camera sau"
         >
@@ -955,7 +953,7 @@
 <script src="vision.js?v=20260930-audioworklet-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261002-official-route-task-cache-2"></script>
+<script src="robot-control.js?v=20261002-camera-debug-always-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
