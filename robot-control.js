@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-02-official-route-start-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-02-official-route-task-cache-v2";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -928,6 +928,90 @@
   //   - gặp QR ban_<table>: STOP và kết thúc
   // =========================================================
 
+  // Snapshot tạm của nhiệm vụ được lấy trực tiếp từ backend khi bấm BẮT ĐẦU.
+  // Không phụ thuộc trạng thái robot là on_task hay disconnected; chỉ cần backend
+  // còn trả về object tasks cho robot đang chọn.
+  const OFFICIAL_TASK_STORAGE_KEY = "robot_task_temp";
+
+  function isNonEmptyObject(value) {
+    return Boolean(
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length > 0
+    );
+  }
+
+  function saveOfficialTaskTemp(task, robotData = null) {
+    if (!isNonEmptyObject(task)) return null;
+
+    const snapshot = {
+      robot: Number(controlState.robot) || 1,
+      fetchedAt: new Date().toISOString(),
+      table: task.table ?? task.table_number ?? null,
+      line: task.line ?? null,
+      stop_index: task.stop_index ?? null,
+      junction_turn: task.junction_turn ?? null,
+      junction_turn_vi: task.junction_turn_vi ?? null,
+      food_name: task.food_name ?? null,
+      command_id: task.command_id ?? null,
+      robot_status: robotData?.status ?? controlState.robotStatus ?? null,
+      task: { ...task }
+    };
+
+    try {
+      localStorage.setItem(OFFICIAL_TASK_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      log(`OFFICIAL TASK localStorage SAVE ERROR: ${error?.message || error}`);
+    }
+
+    return snapshot;
+  }
+
+  function readOfficialTaskTemp() {
+    try {
+      const raw = localStorage.getItem(OFFICIAL_TASK_STORAGE_KEY);
+      if (!raw) return null;
+      const snapshot = JSON.parse(raw);
+      if (!snapshot || Number(snapshot.robot) !== Number(controlState.robot)) return null;
+      return snapshot;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function fetchAndCacheOfficialTask() {
+    const data = await api("/robot-ai/status");
+    const robotNumber = Number(controlState.robot) || 1;
+    const robots = data?.robots || {};
+    const robotData =
+      robots[`robot_${robotNumber}`] ||
+      robots[String(robotNumber)] ||
+      null;
+
+    const task = robotData?.tasks;
+    if (!isNonEmptyObject(task)) {
+      throw new Error(`Backend chưa trả về nhiệm vụ cho Robot ${robotNumber}.`);
+    }
+
+    controlState.latestTask = { ...task };
+    controlState.currentDispatch = {
+      task: { ...task },
+      route: { ...task },
+      restored_from_status: true,
+      fetched_on_start: true
+    };
+    controlState.navigationTaskKey = buildNavigationTaskKey(task);
+
+    const snapshot = saveOfficialTaskTemp(task, robotData);
+    log(
+      `OFFICIAL TASK FETCH robot=${robotNumber} ` +
+      `table=${task.table ?? task.table_number ?? "-"} ` +
+      `turn=${task.junction_turn ?? task.junction_turn_vi ?? "-"}`
+    );
+    return snapshot;
+  }
+
   const officialRouteSession = {
     active: false,
     phase: "idle",
@@ -976,13 +1060,18 @@
     return match ? Number(match[1]) : 0;
   }
 
-  function getOfficialRouteInfo() {
+  function getOfficialRouteInfo(taskSnapshot = null) {
+    const stored = taskSnapshot || readOfficialTaskTemp() || {};
+    const storedTask = isNonEmptyObject(stored?.task) ? stored.task : stored;
     const dispatch = controlState.currentDispatch || {};
     const statusTask = controlState.latestTask || {};
     const navTask = navigation?.task || {};
     const route = dispatch.route || dispatch.task || {};
 
     const table =
+      parseTableNumber(storedTask.table) ||
+      parseTableNumber(storedTask.table_number) ||
+      parseTableNumber(stored.table) ||
       parseTableNumber(statusTask.table) ||
       parseTableNumber(statusTask.table_number) ||
       parseTableNumber(dispatch.table) ||
@@ -990,15 +1079,21 @@
       parseTableNumber(route.table_number) ||
       parseTableNumber(navTask.table) ||
       parseTableNumber(navTask.table_number) ||
+      parseTableNumber($("robotTaskTable")?.textContent) ||
       parseTableNumber($("routeTable")?.textContent);
 
     const turnRaw =
+      storedTask.junction_turn ??
+      storedTask.junction_turn_vi ??
+      stored.junction_turn ??
+      stored.junction_turn_vi ??
       statusTask.junction_turn ??
       statusTask.junction_turn_vi ??
       route.junction_turn ??
       route.junction_turn_vi ??
       navTask.junction_turn ??
       navTask.junction_turn_vi ??
+      $("robotTaskTurn")?.textContent ??
       $("routeTurn")?.textContent ??
       "";
 
@@ -1006,7 +1101,8 @@
       table,
       turnDirection: normalizeRouteTurn(turnRaw),
       turnRaw: String(turnRaw || ""),
-      turnAngle: readOfficialTurnAngle()
+      turnAngle: readOfficialTurnAngle(),
+      task: { ...storedTask }
     };
   }
 
@@ -1286,10 +1382,21 @@
       return;
     }
 
-    const routeInfo = getOfficialRouteInfo();
+    let taskSnapshot;
+    try {
+      // BẮT ĐẦU luôn GET status mới nhất từ backend, lấy tasks của robot đang chọn
+      // và lưu vào localStorage trước khi dùng cho toàn bộ hành trình.
+      taskSnapshot = await fetchAndCacheOfficialTask();
+    } catch (error) {
+      alert(`Không lấy được nhiệm vụ hiện tại: ${error.message}`);
+      setMessage(`Không thể bắt đầu: ${error.message}`, true);
+      return;
+    }
+
+    const routeInfo = getOfficialRouteInfo(taskSnapshot);
     if (!routeInfo.table) {
-      alert("Chưa có thông tin bàn đích của nhiệm vụ.");
-      setMessage("Không thể bắt đầu: chưa xác định được số bàn cần giao.", true);
+      alert("Nhiệm vụ đã tải nhưng không có số bàn đích.");
+      setMessage("Không thể bắt đầu: nhiệm vụ backend thiếu trường table/table_number.", true);
       return;
     }
 
@@ -1805,7 +1912,14 @@
   }
 
   function manualStop() {
-    // STOP khẩn cấp: gửi 0 rồi xóa đúng 3 key của phiên giống web_2.zip.
+    // STOP khẩn cấp: hủy cả phiên BẮT ĐẦU chính thức để không có timer/QR nào
+    // gửi lệnh chạy lại sau khi STOP. Sau đó gửi payload 0 lên topic/status.
+    const wasOfficialActive = officialRouteSession.active;
+    if (wasOfficialActive) {
+      try { vision.stop(); } catch (_) {}
+      resetOfficialRouteSession();
+    }
+
     const wasActive = debugTurnSession.active;
     controlState.manualTurnToken += 1;
     if (controlState.manualTurnTimer) {
@@ -1831,7 +1945,7 @@
         setManualAngleDisplay(0, 0);
         setManualControlState("Đã STOP", "bad");
         setMessage('Debug: đã gửi STOP (topic/status = "0") và xóa dữ liệu phiên localStorage.');
-        log(`DEBUG STOP command=0 activeBefore=${wasActive}`);
+        log(`DEBUG STOP command=0 debugActiveBefore=${wasActive} officialActiveBefore=${wasOfficialActive}`);
       });
     } catch (error) {
       clearSavedDebugTurnSettings();
@@ -1842,26 +1956,35 @@
   }
 
   function stopEverything(reason = "manual") {
+    // DỪNG ROBOT theo protocol mới: luôn gửi payload 0 lên topic/status.
+    // Đồng thời hủy mọi phiên gyro/QR ở frontend để không thể tự gửi 1/2/3/4/5 lại.
     cancelManualTurn({ sendStop: false, clearStorage: true });
-    rememberManualTask();
-
-    // Ghi nhớ task bị người dùng dừng để status polling không tự bật lại.
-    if (controlState.navigationTaskKey) {
-      controlState.blockedResumeTaskKey = controlState.navigationTaskKey;
+    clearOfficialTurnTimer();
+    if (officialRouteSession.active) {
+      resetOfficialRouteSession();
     }
 
-    try {
-      navigation.stop(reason);
-    } catch (_) {}
+    stopLocalNavigationForDebug(reason);
 
     try {
-      mqttBridge.stopMotor();
-    } catch (_) {}
+      if (mqttBridge?.connected) {
+        publishDebugStatusCommand(DEBUG_COMMAND.STOP, (error) => {
+          if (error) {
+            setMessage(`STOP lỗi: ${error.message}`, true);
+            return;
+          }
+          setMessage(`Robot đã dừng (${reason}) · topic/status = 0.`);
+          log(`GLOBAL STOP command=0 reason=${reason}`);
+        });
+      } else {
+        setMessage(`Đã hủy điều khiển frontend (${reason}), nhưng MQTT chưa kết nối để gửi STOP.`, true);
+      }
+    } catch (error) {
+      setMessage(`Không gửi được STOP: ${error.message}`, true);
+    }
 
-    vision.stop();
+    try { vision.stop(); } catch (_) {}
     closeCameraDebug();
-
-    setMessage(`Robot đã dừng (${reason}).`);
   }
 
   function switchRobot(robotNumber) {
@@ -1875,6 +1998,7 @@
 
     cancelManualTurn({ sendStop: true, clearStorage: true });
     controlState.manualSavedTask = null;
+    try { localStorage.removeItem(OFFICIAL_TASK_STORAGE_KEY); } catch (_) {}
     setManualAngleDisplay(0, 0);
     setManualControlState("Sẵn sàng");
 
@@ -1923,28 +2047,35 @@
     controlState.robotStatus = status;
     setDebugAvailability(status === "on_task");
 
-    if (status === "on_task") {
-      const task = robotData?.tasks;
-      if (task && typeof task === "object" && Object.keys(task).length > 0) {
-        controlState.latestTask = { ...task };
-        controlState.currentDispatch = controlState.currentDispatch || {
-          task: { ...task },
-          route: { ...task },
-          restored_from_status: true
-        };
-        controlState.navigationTaskKey = buildNavigationTaskKey(task);
-      }
+    // Backend có thể vẫn trả tasks ngay cả khi trường status đang là
+    // disconnected (đúng như ảnh/log hiện tại). Vì vậy không được chỉ lưu task
+    // khi status === on_task.
+    const task = robotData?.tasks;
+    if (isNonEmptyObject(task)) {
+      controlState.latestTask = { ...task };
+      controlState.currentDispatch = {
+        task: { ...task },
+        route: { ...task },
+        restored_from_status: true
+      };
+      controlState.navigationTaskKey = buildNavigationTaskKey(task);
+    }
 
+    if (status === "on_task") {
       // Protocol chính thức mới KHÔNG tự khởi động controller PWM cũ.
       // Chỉ lưu task; robot bắt đầu khi người dùng bấm BẮT ĐẦU.
       return;
     }
 
-    // Khi backend xác nhận robot không còn ON TASK, task cũ kết thúc.
-    controlState.latestTask = null;
-    controlState.navigationTaskKey = null;
-    controlState.blockedResumeTaskKey = null;
-    controlState.manualSavedTask = null;
+    // Nếu status không phải on_task nhưng backend vẫn còn tasks, giữ snapshot
+    // để giao diện và nút BẮT ĐẦU có thể sử dụng. Chỉ xóa khi thực sự không có task.
+    if (!isNonEmptyObject(task)) {
+      controlState.latestTask = null;
+      controlState.currentDispatch = null;
+      controlState.navigationTaskKey = null;
+      controlState.blockedResumeTaskKey = null;
+      controlState.manualSavedTask = null;
+    }
   });
 
   $("cameraDebugButton")?.addEventListener("click", async () => {
