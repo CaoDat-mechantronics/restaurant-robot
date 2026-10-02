@@ -527,7 +527,7 @@
           <div class="manual-control-head">
             <div>
               <b>Điều khiển chuyển động manual</b>
-              <small>Điều khiển trực tiếp để test robot. Khi dùng quay hoặc rẽ manual, bám line tự động sẽ tạm dừng.</small>
+              <small>Điều khiển trực tiếp qua MQTT topic/status. Quay/rẽ dùng gyro để tự gửi STOP khi đạt góc đích.</small>
             </div>
             <span id="manualControlState" class="manual-control-state">Sẵn sàng</span>
           </div>
@@ -935,7 +935,7 @@
 <script src="vision.js?v=20260930-audioworklet-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261001-manual-angle-status-1"></script>
+<script src="robot-control.js?v=20261002-web2-turn-protocol-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL

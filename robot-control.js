@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-01-manual-angle-status-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-02-web2-turn-protocol-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -872,6 +872,7 @@
     el.textContent = message;
     el.className = `manual-control-state${cls ? ` ${cls}` : ""}`;
   }
+
   function formatManualAngle(value) {
     const num = Number(value);
     if (!Number.isFinite(num)) return "0°";
@@ -886,6 +887,135 @@
     if (currentEl) currentEl.textContent = formatManualAngle(current);
   }
 
+  // =========================================================
+  // DEBUG CONTROL PROTOCOL - theo web_2.zip
+  // topic/status:
+  //   0 = STOP
+  //   1 = QUAY TRÁI
+  //   2 = QUAY PHẢI
+  //   3 = BÁM LINE
+  //   4 = RẼ TRÁI
+  //   5 = RẼ PHẢI
+  // =========================================================
+
+  const DEBUG_STATUS_TOPIC = "topic/status";
+  const DEBUG_COMMAND = Object.freeze({
+    STOP: "0",
+    TURN_LEFT: "1",
+    TURN_RIGHT: "2",
+    LINE_FOLLOW: "3",
+    STEER_LEFT: "4",
+    STEER_RIGHT: "5"
+  });
+
+  // Dùng đúng tên key và cách lưu riêng từng giá trị như web_2.zip.
+  const DEBUG_TURN_STORAGE_KEYS = Object.freeze({
+    direction: "robot_turn_direction",
+    targetAngle: "robot_turn_target_angle",
+    stopLead: "robot_turn_stop_lead"
+  });
+
+  const debugTurnSession = {
+    active: false,
+    stopSent: false,
+    command: null,
+    targetAngle: 0,
+    stopLead: 0,
+    startYaw: null,
+    previousYaw: null,
+    angleTurned: 0
+  };
+
+  function normalizeDebugStopLead(value) {
+    const lead = Number(value);
+    if (!Number.isFinite(lead)) return 0;
+    return Math.max(0, Math.min(30, lead));
+  }
+
+  function readSavedDebugTurnSettings() {
+    try {
+      const direction = localStorage.getItem(DEBUG_TURN_STORAGE_KEYS.direction);
+      const targetAngle = Number(localStorage.getItem(DEBUG_TURN_STORAGE_KEYS.targetAngle));
+      const stopLead = normalizeDebugStopLead(
+        localStorage.getItem(DEBUG_TURN_STORAGE_KEYS.stopLead)
+      );
+
+      return {
+        direction,
+        targetAngle: Number.isFinite(targetAngle) ? targetAngle : 0,
+        stopLead
+      };
+    } catch (_) {
+      return { direction: null, targetAngle: 0, stopLead: 0 };
+    }
+  }
+
+  function saveDebugTurnSettings(direction, targetAngle, stopLead = 0) {
+    try {
+      localStorage.setItem(
+        DEBUG_TURN_STORAGE_KEYS.direction,
+        String(direction)
+      );
+      localStorage.setItem(
+        DEBUG_TURN_STORAGE_KEYS.targetAngle,
+        String(targetAngle)
+      );
+      localStorage.setItem(
+        DEBUG_TURN_STORAGE_KEYS.stopLead,
+        String(normalizeDebugStopLead(stopLead))
+      );
+    } catch (error) {
+      log(`DEBUG localStorage SAVE ERROR: ${error?.message || error}`);
+    }
+  }
+
+  function clearSavedDebugTurnSettings() {
+    try {
+      // Chỉ xóa 3 key của phiên quay/rẽ, không dùng localStorage.clear().
+      localStorage.removeItem(DEBUG_TURN_STORAGE_KEYS.direction);
+      localStorage.removeItem(DEBUG_TURN_STORAGE_KEYS.targetAngle);
+      localStorage.removeItem(DEBUG_TURN_STORAGE_KEYS.stopLead);
+    } catch (error) {
+      log(`DEBUG localStorage CLEAR ERROR: ${error?.message || error}`);
+    }
+  }
+
+  function resetDebugTurnSession({ clearStorage = true } = {}) {
+    debugTurnSession.active = false;
+    debugTurnSession.stopSent = false;
+    debugTurnSession.command = null;
+    debugTurnSession.targetAngle = 0;
+    debugTurnSession.stopLead = 0;
+    debugTurnSession.startYaw = null;
+    debugTurnSession.previousYaw = null;
+    debugTurnSession.angleTurned = 0;
+
+    if (clearStorage) {
+      clearSavedDebugTurnSettings();
+    }
+  }
+
+  function publishDebugStatusCommand(command, callback = null) {
+    if (!mqttBridge?.client || !mqttBridge.connected) {
+      throw new Error("MQTT WebSocket chưa connected.");
+    }
+
+    const payload = String(command);
+    mqttBridge.client.publish(
+      DEBUG_STATUS_TOPIC,
+      payload,
+      { qos: 1, retain: false },
+      (error) => {
+        if (error) {
+          log(`DEBUG MQTT PUB ERROR ${DEBUG_STATUS_TOPIC}: ${error.message}`);
+        }
+        if (callback) callback(error || null);
+      }
+    );
+
+    log(`DEBUG MQTT PUB ${DEBUG_STATUS_TOPIC} payload=${payload}`);
+    return true;
+  }
 
   function rememberManualTask() {
     const task = navigation?.task;
@@ -894,39 +1024,48 @@
     }
   }
 
-  function cancelManualTurn({ stopMotor = true } = {}) {
-    controlState.manualTurnToken += 1;
-
-    if (controlState.manualTurnTimer) {
-      clearInterval(controlState.manualTurnTimer);
-      controlState.manualTurnTimer = null;
-    }
-
-    if (stopMotor) {
-      try {
-        navigation.sendMotor(0, 0, true);
-      } catch (_) {
-        try { mqttBridge.stopMotor(); } catch (_) {}
-      }
-    }
-  }
-
-  function stopNavigationForManual(reason) {
+  // Chỉ dừng timer điều khiển frontend cũ; KHÔNG gửi left/right PWM.
+  // Bảng Debug từ đây chỉ điều khiển ESP32 qua topic/status với payload 0..5.
+  function stopLocalNavigationForDebug(reason) {
     rememberManualTask();
 
     if (controlState.navigationTaskKey) {
       controlState.blockedResumeTaskKey = controlState.navigationTaskKey;
     }
 
-    if (
-      navigation.state !== "IDLE" &&
-      navigation.state !== "STOPPED" &&
-      navigation.state !== "ERROR"
-    ) {
-      navigation.stop(reason);
-    } else {
-      navigation.sendMotor(0, 0, true);
+    if (navigation?.controlTimer) {
+      clearInterval(navigation.controlTimer);
+      navigation.controlTimer = null;
     }
+
+    try { navigation?.setMotorReason?.("STOPPED", reason); } catch (_) {}
+    try {
+      navigation?.setState?.("STOPPED", reason);
+    } catch (_) {
+      if (navigation) navigation.state = "STOPPED";
+    }
+  }
+
+  function cancelManualTurn({ sendStop = false, clearStorage = true } = {}) {
+    const wasActive = debugTurnSession.active;
+
+    controlState.manualTurnToken += 1;
+    if (controlState.manualTurnTimer) {
+      clearInterval(controlState.manualTurnTimer);
+      controlState.manualTurnTimer = null;
+    }
+
+    if (
+      sendStop &&
+      wasActive &&
+      debugTurnSession.stopSent === false &&
+      mqttBridge?.connected
+    ) {
+      debugTurnSession.stopSent = true;
+      try { publishDebugStatusCommand(DEBUG_COMMAND.STOP); } catch (_) {}
+    }
+
+    resetDebugTurnSession({ clearStorage });
   }
 
   async function waitForYaw(timeoutMs = 1800) {
@@ -949,277 +1088,315 @@
     return null;
   }
 
-  async function manualTurn(direction, rawAngle) {
-    const targetAngle = Math.max(1, Math.min(360, Number(rawAngle) || 90));
+  async function runManualAngleCommand({
+    mode,
+    direction,
+    rawAngle,
+    command,
+    maxAngle = 360
+  }) {
+    const requested = Number(rawAngle);
+    const targetAngle = Math.max(
+      1,
+      Math.min(maxAngle, Number.isFinite(requested) ? requested : 90)
+    );
     const dir = direction === "LEFT" ? "LEFT" : "RIGHT";
+    const actionVi = mode === "turn"
+      ? (dir === "LEFT" ? "quay trái" : "quay phải")
+      : (dir === "LEFT" ? "rẽ trái" : "rẽ phải");
 
     if (!mqttBridge.connected) {
       setManualControlState("MQTT chưa kết nối", "bad");
-      setMessage("Không thể quay manual: MQTT WebSocket chưa connected.", true);
+      setMessage(`Không thể ${actionVi}: MQTT WebSocket chưa connected.`, true);
       return;
     }
 
-    cancelManualTurn({ stopMotor: true });
-    stopNavigationForManual(`manual ${dir.toLowerCase()}`);
+    // Đọc trước stopLead nếu web_2 đã từng lưu giá trị này.
+    // Sau đó mới reset phiên cũ để không làm mất cấu hình bù dừng.
+    const persistedBeforeStart = readSavedDebugTurnSettings();
+
+    // Nếu đang có một phiên quay/rẽ khác, STOP phiên đó trước.
+    if (debugTurnSession.active) {
+      cancelManualTurn({ sendStop: true, clearStorage: true });
+    } else {
+      cancelManualTurn({ sendStop: false, clearStorage: true });
+    }
+    stopLocalNavigationForDebug(`debug ${mode}_${dir.toLowerCase()}`);
+
+    setManualAngleDisplay(targetAngle, 0);
+    setManualControlState(`Đang lấy góc ban đầu · ${targetAngle}°`, "warn");
 
     const startYaw = await waitForYaw();
     if (startYaw == null) {
       setManualControlState("Chưa có dữ liệu gyro", "bad");
-      setMessage("Không thể quay theo góc vì chưa đọc được yaw. Hãy bấm Cho phép Gyro/Camera.", true);
+      setMessage(`Không thể ${actionVi} theo góc vì chưa đọc được yaw. Hãy cho phép Gyroscope.`, true);
       return;
     }
 
+    // Cách lưu localStorage giống web_2.zip.
+    // stopLead chưa có ô nhập ở UI này, nên dùng giá trị đã lưu trước đó nếu hợp lệ,
+    // nếu chưa từng có thì mặc định 0°.
+    const stopLead = Math.min(
+      normalizeDebugStopLead(persistedBeforeStart.stopLead),
+      Math.max(0, targetAngle - 0.5)
+    );
+    saveDebugTurnSettings(command, targetAngle, stopLead);
+
+    // Chụp yaw bắt đầu TRƯỚC khi publish lệnh chuyển động.
+    debugTurnSession.active = true;
+    debugTurnSession.stopSent = false;
+    debugTurnSession.command = String(command);
+    debugTurnSession.targetAngle = targetAngle;
+    debugTurnSession.stopLead = stopLead;
+    debugTurnSession.startYaw = Number(startYaw);
+    debugTurnSession.previousYaw = Number(startYaw);
+    debugTurnSession.angleTurned = 0;
+
     const token = ++controlState.manualTurnToken;
     const startedAt = performance.now();
-    const timeoutMs = Math.max(10000, targetAngle * 180);
-    const tolerance = Math.max(
-      0.8,
-      Number(navConfig.TURN_TARGET_TOLERANCE_DEG) || 2
+    const timeoutMs = Math.max(12000, targetAngle * 350);
+
+    try {
+      // Chỉ gửi lệnh quay/rẽ đúng MỘT lần.
+      publishDebugStatusCommand(command, (error) => {
+        if (!error) return;
+        if (token !== controlState.manualTurnToken) return;
+
+        if (controlState.manualTurnTimer) {
+          clearInterval(controlState.manualTurnTimer);
+          controlState.manualTurnTimer = null;
+        }
+        resetDebugTurnSession({ clearStorage: true });
+        setManualControlState("Không gửi được lệnh", "bad");
+        setMessage(`Không gửi được lệnh ${actionVi}. Đã reset phiên.`, true);
+      });
+    } catch (error) {
+      resetDebugTurnSession({ clearStorage: true });
+      setManualControlState("Không gửi được lệnh", "bad");
+      setMessage(error.message, true);
+      return;
+    }
+
+    setManualControlState(`Đang ${actionVi} 0/${targetAngle}°`, "warn");
+    setMessage(
+      `Debug: đã gửi ${command} = ${actionVi.toUpperCase()}. ` +
+      `Mục tiêu ${targetAngle}°${stopLead > 0 ? `, bù dừng ${stopLead}°` : ""}.`
+    );
+    log(
+      `DEBUG ANGLE START command=${command} target=${targetAngle} ` +
+      `startYaw=${Number(startYaw).toFixed(1)} stopLead=${stopLead}`
     );
 
-    setManualAngleDisplay(targetAngle, 0);
-    setManualControlState(`Đang quay ${dir === "LEFT" ? "trái" : "phải"} 0/${targetAngle}°`, "warn");
-    setMessage(`Manual: đang quay ${dir === "LEFT" ? "trái" : "phải"} ${targetAngle}° bằng gyro.`);
-    log(`MANUAL TURN ${dir} target=${targetAngle} startYaw=${Number(startYaw).toFixed(1)}`);
+    const completeAndStop = (completedAngle) => {
+      if (token !== controlState.manualTurnToken) return;
+      if (debugTurnSession.stopSent) return;
+
+      // Khóa trước để tick tiếp theo không thể gửi STOP lần 2.
+      debugTurnSession.stopSent = true;
+      debugTurnSession.active = false;
+
+      if (controlState.manualTurnTimer) {
+        clearInterval(controlState.manualTurnTimer);
+        controlState.manualTurnTimer = null;
+      }
+
+      setManualAngleDisplay(targetAngle, completedAngle);
+      setManualControlState(`Hoàn tất ${completedAngle.toFixed(1)}°`, "good");
+
+      try {
+        publishDebugStatusCommand(DEBUG_COMMAND.STOP, (error) => {
+          if (error) {
+            resetDebugTurnSession({ clearStorage: true });
+            setMessage("Đạt góc nhưng publish STOP báo lỗi. Đã reset dữ liệu frontend.", true);
+            return;
+          }
+
+          // Giống web_2: STOP thành công thì xóa 3 key localStorage của phiên.
+          resetDebugTurnSession({ clearStorage: true });
+          setMessage(
+            `Hoàn tất ở ${completedAngle.toFixed(1)}°. ` +
+            `Đã gửi topic/status = 0 và xóa dữ liệu phiên khỏi localStorage.`
+          );
+          log(`DEBUG ANGLE DONE command=${command} angle=${completedAngle.toFixed(1)}/${targetAngle}`);
+        });
+      } catch (error) {
+        resetDebugTurnSession({ clearStorage: true });
+        setMessage(`Đạt góc nhưng không gửi được STOP: ${error.message}`, true);
+      }
+    };
 
     const tick = () => {
       if (token !== controlState.manualTurnToken) return;
+      if (!debugTurnSession.active) return;
 
       const yaw = orientation.getYaw();
       if (yaw == null) {
-        cancelManualTurn({ stopMotor: true });
+        cancelManualTurn({ sendStop: true, clearStorage: true });
         setManualControlState("Mất dữ liệu gyro", "bad");
-        setMessage("Manual turn đã dừng vì mất dữ liệu yaw.", true);
+        setMessage(`Debug ${actionVi} đã dừng vì mất dữ liệu yaw.`, true);
         return;
       }
 
-      const turned = Math.abs(
-        window.RobotOrientation.deltaDegrees(yaw, startYaw)
+      if (debugTurnSession.previousYaw == null) {
+        debugTurnSession.previousYaw = Number(yaw);
+        return;
+      }
+
+      // Thuật toán giống web_2.zip: lấy delta ngắn nhất giữa 2 mẫu liên tiếp,
+      // nên đi qua mốc 359° -> 0° vẫn chỉ được tính là vài độ.
+      const delta = window.RobotOrientation.deltaDegrees(
+        Number(yaw),
+        debugTurnSession.previousYaw
+      );
+      debugTurnSession.previousYaw = Number(yaw);
+
+      const deltaAbs = Math.abs(Number(delta) || 0);
+
+      // Lọc jitter rất nhỏ giống web_2.zip.
+      if (deltaAbs < 0.08) {
+        setManualAngleDisplay(targetAngle, debugTurnSession.angleTurned);
+        return;
+      }
+
+      // Bỏ qua spike sensor phi thực tế giống web_2.zip.
+      if (deltaAbs > 45) {
+        setManualAngleDisplay(targetAngle, debugTurnSession.angleTurned);
+        return;
+      }
+
+      debugTurnSession.angleTurned += deltaAbs;
+      const angleTurned = debugTurnSession.angleTurned;
+
+      setManualAngleDisplay(targetAngle, angleTurned);
+      setManualControlState(
+        `Đang ${actionVi} ${angleTurned.toFixed(1)}/${targetAngle}°`,
+        "warn"
       );
 
-      if (turned >= Math.max(0, targetAngle - tolerance)) {
-        cancelManualTurn({ stopMotor: true });
-        setManualAngleDisplay(targetAngle, turned);
-        setManualControlState(`Hoàn tất ${turned.toFixed(1)}°`, "good");
-        setMessage(`Manual: đã quay ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}°.`);
-        log(`MANUAL TURN DONE ${dir} angle=${turned.toFixed(1)}`);
+      const stopThreshold = Math.max(
+        0.5,
+        targetAngle - debugTurnSession.stopLead
+      );
+
+      if (
+        angleTurned >= stopThreshold &&
+        debugTurnSession.stopSent === false
+      ) {
+        completeAndStop(angleTurned);
         return;
       }
 
       if (performance.now() - startedAt > timeoutMs) {
-        cancelManualTurn({ stopMotor: true });
-        setManualAngleDisplay(targetAngle, turned);
-        setManualControlState("Timeout", "bad");
-        setMessage(`Manual turn timeout trước khi đạt ${targetAngle}°.`, true);
-        log(`MANUAL TURN TIMEOUT ${dir} angle=${turned.toFixed(1)}/${targetAngle}`);
-        return;
+        const timedOutAngle = angleTurned;
+        cancelManualTurn({ sendStop: true, clearStorage: true });
+        setManualAngleDisplay(targetAngle, timedOutAngle);
+        setManualControlState(`Timeout ${timedOutAngle.toFixed(1)}/${targetAngle}°`, "bad");
+        setMessage(`Debug ${actionVi} timeout trước khi đạt ${targetAngle}°.`, true);
+        log(`DEBUG ANGLE TIMEOUT command=${command} angle=${timedOutAngle.toFixed(1)}/${targetAngle}`);
       }
-
-      const remaining = Math.max(0, targetAngle - turned);
-      let speed;
-      if (remaining > 35) {
-        speed = Number(navConfig.TURN_FAST_SPEED) || 88;
-      } else if (remaining > 12) {
-        speed = Number(navConfig.TURN_MEDIUM_SPEED) || 68;
-      } else {
-        speed = Number(navConfig.TURN_SLOW_SPEED) || 48;
-      }
-
-      if (dir === "LEFT") {
-        navigation.sendMotor(-speed, speed, true);
-      } else {
-        navigation.sendMotor(speed, -speed, true);
-      }
-
-      setManualAngleDisplay(targetAngle, turned);
-      setManualControlState(
-        `Đang quay ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}/${targetAngle}°`,
-        "warn"
-      );
     };
 
     tick();
-    controlState.manualTurnTimer = window.setInterval(
-      tick,
-      Math.max(35, Number(navConfig.MOTOR_INTERVAL_MS) || 40)
-    );
+    controlState.manualTurnTimer = window.setInterval(tick, 50);
+  }
+
+  async function manualTurn(direction, rawAngle) {
+    const dir = direction === "LEFT" ? "LEFT" : "RIGHT";
+    return runManualAngleCommand({
+      mode: "turn",
+      direction: dir,
+      rawAngle,
+      command: dir === "LEFT" ? DEBUG_COMMAND.TURN_LEFT : DEBUG_COMMAND.TURN_RIGHT,
+      maxAngle: 360
+    });
   }
 
   async function manualSteer(direction, rawAngle) {
-    const targetAngle = Math.max(1, Math.min(180, Number(rawAngle) || 90));
     const dir = direction === "LEFT" ? "LEFT" : "RIGHT";
-
-    if (!mqttBridge.connected) {
-      setManualControlState("MQTT chưa kết nối", "bad");
-      setMessage("Không thể rẽ manual: MQTT WebSocket chưa connected.", true);
-      return;
-    }
-
-    cancelManualTurn({ stopMotor: true });
-    stopNavigationForManual(`manual steer ${dir.toLowerCase()}`);
-
-    const startYaw = await waitForYaw();
-    if (startYaw == null) {
-      setManualControlState("Chưa có dữ liệu gyro", "bad");
-      setMessage("Không thể rẽ theo góc vì chưa đọc được yaw. Hãy bấm Cho phép Gyro/Camera.", true);
-      return;
-    }
-
-    const maxLogical = Math.max(1, Number(navConfig.MAX_SPEED) || 155);
-    const clampSpeed = (value, fallback) =>
-      Math.max(1, Math.min(maxLogical, Math.round(Number(value) || fallback)));
-
-    // Rẽ manual là cua theo cung: cả hai bánh vẫn chạy tiến.
-    // Bánh ngoài lấy tốc độ vào cua, bánh trong lấy tốc độ rẽ.
-    const outerBase = clampSpeed(navConfig.CORNER_ENTRY_SPEED, 120);
-    const requestedInner = clampSpeed(navConfig.MIN_CURVE_SPEED, 110);
-    const innerBase = Math.max(1, Math.min(requestedInner, outerBase - 5));
-
-    const token = ++controlState.manualTurnToken;
-    const startedAt = performance.now();
-    const timeoutMs = Math.max(15000, targetAngle * 300);
-    const tolerance = Math.max(
-      0.8,
-      Number(navConfig.TURN_TARGET_TOLERANCE_DEG) || 2
-    );
-
-    setManualAngleDisplay(targetAngle, 0);
-    setManualControlState(`Đang rẽ ${dir === "LEFT" ? "trái" : "phải"} 0/${targetAngle}°`, "warn");
-    setMessage(
-      `Manual: đang rẽ ${dir === "LEFT" ? "trái" : "phải"} ${targetAngle}° ` +
-      `(bánh trong ${innerBase}, bánh ngoài ${outerBase}).`
-    );
-    log(
-      `MANUAL STEER ${dir} target=${targetAngle} startYaw=${Number(startYaw).toFixed(1)} ` +
-      `inner=${innerBase} outer=${outerBase}`
-    );
-
-    const tick = () => {
-      if (token !== controlState.manualTurnToken) return;
-
-      const yaw = orientation.getYaw();
-      if (yaw == null) {
-        cancelManualTurn({ stopMotor: true });
-        setManualControlState("Mất dữ liệu gyro", "bad");
-        setMessage("Manual steer đã dừng vì mất dữ liệu yaw.", true);
-        return;
-      }
-
-      const turned = Math.abs(
-        window.RobotOrientation.deltaDegrees(yaw, startYaw)
-      );
-
-      if (turned >= Math.max(0, targetAngle - tolerance)) {
-        cancelManualTurn({ stopMotor: true });
-        setManualAngleDisplay(targetAngle, turned);
-        setManualControlState(`Rẽ xong ${turned.toFixed(1)}°`, "good");
-        setMessage(`Manual: đã rẽ ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}°.`);
-        log(`MANUAL STEER DONE ${dir} angle=${turned.toFixed(1)}`);
-        return;
-      }
-
-      if (performance.now() - startedAt > timeoutMs) {
-        cancelManualTurn({ stopMotor: true });
-        setManualAngleDisplay(targetAngle, turned);
-        setManualControlState("Timeout", "bad");
-        setMessage(`Manual steer timeout trước khi đạt ${targetAngle}°.`, true);
-        log(`MANUAL STEER TIMEOUT ${dir} angle=${turned.toFixed(1)}/${targetAngle}`);
-        return;
-      }
-
-      const remaining = Math.max(0, targetAngle - turned);
-      const factor = remaining <= 10 ? 0.65 : remaining <= 25 ? 0.82 : 1;
-      const outer = Math.max(1, Math.round(outerBase * factor));
-      const inner = Math.max(1, Math.min(Math.round(innerBase * factor), outer - 3));
-
-      if (dir === "LEFT") {
-        navigation.sendMotor(inner, outer, true);
-      } else {
-        navigation.sendMotor(outer, inner, true);
-      }
-
-      setManualAngleDisplay(targetAngle, turned);
-      setManualControlState(
-        `Đang rẽ ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}/${targetAngle}°`,
-        "warn"
-      );
-    };
-
-    tick();
-    controlState.manualTurnTimer = window.setInterval(
-      tick,
-      Math.max(35, Number(navConfig.MOTOR_INTERVAL_MS) || 40)
-    );
+    return runManualAngleCommand({
+      mode: "steer",
+      direction: dir,
+      rawAngle,
+      command: dir === "LEFT" ? DEBUG_COMMAND.STEER_LEFT : DEBUG_COMMAND.STEER_RIGHT,
+      maxAngle: 180
+    });
   }
 
-  async function manualLineFollow() {
+  function manualLineFollow() {
     if (!mqttBridge.connected) {
       setManualControlState("MQTT chưa kết nối", "bad");
       setMessage("Không thể bám line: MQTT WebSocket chưa connected.", true);
       return;
     }
 
-    cancelManualTurn({ stopMotor: true });
+    // Nếu đang quay/rẽ thì STOP phiên đó trước, sau đó mới chuyển sang bám line.
+    if (debugTurnSession.active) {
+      cancelManualTurn({ sendStop: true, clearStorage: true });
+    } else {
+      cancelManualTurn({ sendStop: false, clearStorage: true });
+    }
+    stopLocalNavigationForDebug("debug line follow");
 
     try {
-      if (!controlState.orientationPermissionReady) {
-        await requestOrientationPermission();
-      } else {
-        orientation.start();
-      }
+      // web_2 lưu direction hiện tại; với bám line direction = 3.
+      saveDebugTurnSettings(DEBUG_COMMAND.LINE_FOLLOW, 0, 0);
+      publishDebugStatusCommand(DEBUG_COMMAND.LINE_FOLLOW, (error) => {
+        if (!error) return;
+        clearSavedDebugTurnSettings();
+        setManualControlState("Không gửi được lệnh", "bad");
+        setMessage("Không gửi được lệnh bám line. Đã xóa dữ liệu phiên.", true);
+      });
 
-      if (!controlState.cameraPermissionReady) {
-        await prepareCameraPermission();
-      }
-
-      const savedTask = controlState.manualSavedTask;
-      const existingTask = navigation?.task;
-      const task =
-        savedTask ||
-        (existingTask && existingTask.manual_control !== true ? { ...existingTask } : null);
-
-      if (task) {
-        await startNavigation(task);
-        const taskKey = buildNavigationTaskKey(task);
-        if (taskKey) {
-          controlState.navigationTaskKey = taskKey;
-          controlState.blockedResumeTaskKey = null;
-        }
-        setManualAngleDisplay(0, 0);
-        setManualControlState("Đang bám line · task hiện tại", "good");
-        log(`MANUAL LINE FOLLOW task=${JSON.stringify(task)}`);
-      } else {
-        await vision.start(
-          $("robotCamera"),
-          $("visionOverlay")
-        );
-        updateCameraSwitchButton();
-        navigation.updateSensors(controlState.sensors);
-        navigation.start({ manual_control: true });
-        setMessage("Manual: đang bám line. QR bàn/ngã rẽ sẽ không được xử lý trong chế độ test này.");
-        setManualAngleDisplay(0, 0);
-        setManualControlState("Đang bám line", "good");
-        log("MANUAL LINE FOLLOW without delivery task");
-      }
-    }
-    catch (error) {
-      cancelManualTurn({ stopMotor: true });
-      setManualControlState("Không khởi động được", "bad");
-      setMessage(`Không thể bật bám line manual: ${error.message}`, true);
-      log(`MANUAL LINE ERROR: ${error.message}`);
+      setManualAngleDisplay(0, 0);
+      setManualControlState("Đang bám line", "good");
+      setMessage('Debug: đã gửi BÁM LINE (topic/status = "3"). ESP32 tự điều khiển bám line.');
+      log("DEBUG LINE FOLLOW command=3");
+    } catch (error) {
+      clearSavedDebugTurnSettings();
+      setManualControlState("Không gửi được lệnh", "bad");
+      setMessage(error.message, true);
     }
   }
 
   function manualStop() {
-    cancelManualTurn({ stopMotor: true });
-    stopEverything("manual STOP");
-    setManualAngleDisplay(0, 0);
-    setManualControlState("Đã STOP", "bad");
-    log("MANUAL STOP");
+    // STOP khẩn cấp: gửi 0 rồi xóa đúng 3 key của phiên giống web_2.zip.
+    const wasActive = debugTurnSession.active;
+    controlState.manualTurnToken += 1;
+    if (controlState.manualTurnTimer) {
+      clearInterval(controlState.manualTurnTimer);
+      controlState.manualTurnTimer = null;
+    }
+    debugTurnSession.active = false;
+    debugTurnSession.stopSent = true;
+
+    stopLocalNavigationForDebug("debug STOP");
+
+    try {
+      publishDebugStatusCommand(DEBUG_COMMAND.STOP, (error) => {
+        clearSavedDebugTurnSettings();
+        resetDebugTurnSession({ clearStorage: false });
+
+        if (error) {
+          setManualControlState("STOP lỗi", "bad");
+          setMessage("Publish STOP báo lỗi; đã reset dữ liệu frontend.", true);
+          return;
+        }
+
+        setManualAngleDisplay(0, 0);
+        setManualControlState("Đã STOP", "bad");
+        setMessage('Debug: đã gửi STOP (topic/status = "0") và xóa dữ liệu phiên localStorage.');
+        log(`DEBUG STOP command=0 activeBefore=${wasActive}`);
+      });
+    } catch (error) {
+      clearSavedDebugTurnSettings();
+      resetDebugTurnSession({ clearStorage: false });
+      setManualControlState("STOP lỗi", "bad");
+      setMessage(error.message, true);
+    }
   }
 
   function stopEverything(reason = "manual") {
-    cancelManualTurn({ stopMotor: false });
+    cancelManualTurn({ sendStop: false, clearStorage: true });
     rememberManualTask();
 
     // Ghi nhớ task bị người dùng dừng để status polling không tự bật lại.
@@ -1244,7 +1421,7 @@
   function switchRobot(robotNumber) {
     const next = Number(robotNumber) || 1;
 
-    cancelManualTurn({ stopMotor: true });
+    cancelManualTurn({ sendStop: true, clearStorage: true });
     controlState.manualSavedTask = null;
     setManualAngleDisplay(0, 0);
     setManualControlState("Sẵn sàng");
@@ -1381,6 +1558,25 @@
     if ($("manualSteerRightAngle")) $("manualSteerRightAngle").value = String(savedTurnAngle);
   } catch (_) {}
 
+
+  // Khôi phục giá trị tạm theo đúng 3 key của web_2.zip nếu phiên trước còn dang dở.
+  // Chỉ khôi phục ô nhập; KHÔNG tự gửi lại lệnh cho ESP32 sau reload.
+  try {
+    const savedDebug = readSavedDebugTurnSettings();
+    const savedAngle = Number(savedDebug.targetAngle);
+    if (Number.isFinite(savedAngle) && savedAngle >= 1) {
+      if (savedDebug.direction === DEBUG_COMMAND.TURN_LEFT && $("manualTurnLeftAngle")) {
+        $("manualTurnLeftAngle").value = String(Math.min(360, savedAngle));
+      } else if (savedDebug.direction === DEBUG_COMMAND.TURN_RIGHT && $("manualTurnRightAngle")) {
+        $("manualTurnRightAngle").value = String(Math.min(360, savedAngle));
+      } else if (savedDebug.direction === DEBUG_COMMAND.STEER_LEFT && $("manualSteerLeftAngle")) {
+        $("manualSteerLeftAngle").value = String(Math.min(180, savedAngle));
+      } else if (savedDebug.direction === DEBUG_COMMAND.STEER_RIGHT && $("manualSteerRightAngle")) {
+        $("manualSteerRightAngle").value = String(Math.min(180, savedAngle));
+      }
+    }
+  } catch (_) {}
+
   $("manualTurnLeftButton")?.addEventListener("click", () => {
     manualTurn("LEFT", $("manualTurnLeftAngle")?.value);
   });
@@ -1419,15 +1615,13 @@
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") {
-      // Không để robot tiếp tục chạy nếu tab bị đưa nền.
-      cancelManualTurn({ stopMotor: false });
-      mqttBridge.stopMotor();
+      // Không để thao tác Debug theo góc tiếp tục chạy khi tab bị đưa nền.
+      cancelManualTurn({ sendStop: true, clearStorage: true });
     }
   });
 
   window.addEventListener("beforeunload", () => {
-    cancelManualTurn({ stopMotor: false });
-    mqttBridge.stopMotor();
+    cancelManualTurn({ sendStop: true, clearStorage: true });
     vision.stop();
     mqttBridge.close();
   });
