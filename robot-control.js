@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-02-camera-debug-always-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-02-qr-only-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -242,173 +242,12 @@
 
   const vision = new window.RobotVision({
     config: navConfig,
-    onFrame: (frame) => {
-      navigation?.updateVision(frame);
-
-      const setText = (id, text, className = "") => {
-        const el = $(id);
-        if (!el) return;
-        el.textContent = text;
-        if (className) el.className = className;
-      };
-
-      const leftLabel = frame?.leftFound
-        ? `x=${Math.round(frame.leftX)} · ${(frame.leftConfidence * 100).toFixed(0)}%${frame.leftInferred ? " · ước lượng" : ""}`
-        : (frame?.leftInferred ? "Ước lượng từ lane width" : "Không thấy");
-
-      const rightLabel = frame?.rightFound
-        ? `x=${Math.round(frame.rightX)} · ${(frame.rightConfidence * 100).toFixed(0)}%${frame.rightInferred ? " · ước lượng" : ""}`
-        : (frame?.rightInferred ? "Ước lượng từ lane width" : "Không thấy");
-
-      setText(
-        "visionLeftState",
-        leftLabel,
-        frame?.leftFound ? "good" : (frame?.leftInferred ? "warn" : "bad")
-      );
-
-      setText(
-        "visionRightState",
-        rightLabel,
-        frame?.rightFound ? "good" : (frame?.rightInferred ? "warn" : "bad")
-      );
-
-      setText(
-        "visionCenterState",
-        frame?.laneCenter != null
-          ? `x=${frame.laneCenter.toFixed(1)}`
-          : "-",
-        frame?.hasLane ? "good" : "warn"
-      );
-
-      setText(
-        "visionErrorState",
-        frame?.lineError != null
-          ? `${frame.lineError >= 0 ? "+" : ""}${frame.lineError.toFixed(1)} px`
-          : "-",
-        frame?.lineError != null && Math.abs(frame.lineError) < 25
-          ? "good"
-          : "warn"
-      );
-
-      setText(
-        "visionRawCenterState",
-        frame?.rawLaneCenter != null
-          ? `x=${frame.rawLaneCenter.toFixed(1)}`
-          : "-"
-      );
-
-      setText(
-        "visionRawErrorState",
-        frame?.rawLineError != null
-          ? `${frame.rawLineError >= 0 ? "+" : ""}${frame.rawLineError.toFixed(1)} px`
-          : "-"
-      );
-
-      const thresholdText = Array.isArray(frame?.thresholds)
-        ? frame.thresholds.map((value) => Math.round(value)).join(" / ")
-        : "-";
-
-      setText(
-        "visionThresholdState",
-        `${thresholdText} · dark ${((frame?.darkRatio || 0) * 100).toFixed(1)}%`
-      );
-
-      const laneConfidence = Number(frame?.laneConfidence) || 0;
-      setText(
-        "visionConfidenceState",
-        `${(laneConfidence * 100).toFixed(0)}% · pair ${((frame?.pairCoverage || 0) * 100).toFixed(0)}%`,
-        laneConfidence >= (Number(navConfig.VISION_GOOD_CONFIDENCE) || 0.78)
-          ? "good"
-          : laneConfidence >= (Number(navConfig.VISION_MIN_CONFIDENCE) || 0.38)
-            ? "warn"
-            : "bad"
-      );
-
-      setText(
-        "visionLaneWidthState",
-        frame?.laneWidth != null
-          ? `${frame.laneWidth.toFixed(1)} px`
-          : "-"
-      );
-
-      const controlHeading =
-        frame?.bevHeadingDeg != null
-          ? Number(frame.bevHeadingDeg)
-          : frame?.controlHeadingErrorDeg != null
-            ? Number(frame.controlHeadingErrorDeg)
-            : frame?.headingErrorDeg != null
-              ? Number(frame.headingErrorDeg)
-              : null;
-
-      setText(
-        "visionHeadingState",
-        controlHeading != null && Number.isFinite(controlHeading)
-          ? `${controlHeading >= 0 ? "+" : ""}${controlHeading.toFixed(1)}° · yellow=0°`
-          : "-"
-      );
-
-      setText(
-        "visionCurvatureState",
-        frame?.targetCurvature != null
-          ? `${frame.targetCurvature >= 0 ? "+" : ""}${frame.targetCurvature.toFixed(3)} κ`
-          : "-"
-      );
-
-      setText(
-        "visionBlueCurveState",
-        frame?.blueCurveSeverity != null
-          ? `${frame.blueCurveDirection || "STRAIGHT"} · ${(frame.blueCurveSeverity * 100).toFixed(0)}%`
-          : "-"
-      );
-
-      setText(
-        "visionTargetState",
-        frame?.adaptiveLookaheadCenter != null
-          ? `x=${frame.adaptiveLookaheadCenter.toFixed(1)} · u=${Number(frame.adaptiveLookaheadU || 0).toFixed(2)}`
-          : "-"
-      );
-    },
+    // QR-only: không còn xử lý/detect line ở frontend.
+    onFrame: () => {},
     onQr: (qr) => {
       const text = String(qr?.text || "").trim();
-      const normalizedText = text.toLowerCase();
       const areaPercent = Number(qr?.areaPercent);
       const areaPx = Number(qr?.areaPx);
-
-      const currentTable = Number(
-        navigation?.task?.table ??
-        navigation?.task?.table_number ??
-        controlState.currentDispatch?.table ??
-        0
-      );
-
-      const tablePrefix = String(
-        navConfig.TABLE_QR_PREFIX || "ban_"
-      ).toLowerCase();
-
-      const expectedTableQr = currentTable > 0
-        ? `${tablePrefix}${currentTable}`
-        : "";
-
-      const junctionQr = String(
-        navConfig.JUNCTION_QR_TEXT ||
-        navConfig.T_JUNCTION_QR_TEXT ||
-        "nga_re"
-      ).toLowerCase();
-
-      let threshold = null;
-      let actionLabel = "chỉ nhận diện";
-
-      if (expectedTableQr && normalizedText === expectedTableQr) {
-        threshold = Number(navConfig.TABLE_QR_STOP_AREA_PERCENT) || 4;
-        actionLabel = `dừng bàn ${currentTable}`;
-      }
-      else if (normalizedText === junctionQr) {
-        threshold = Number(
-          navConfig.JUNCTION_QR_TRIGGER_AREA_PERCENT ??
-          navConfig.T_JUNCTION_STOP_AREA_PERCENT
-        ) || 12;
-        actionLabel = "rẽ 90°";
-      }
 
       const el = $("qrState");
       if (el) {
@@ -423,25 +262,16 @@
       const areaEl = $("visionQrAreaState");
       if (areaEl) {
         if (Number.isFinite(areaPercent) && Number.isFinite(areaPx)) {
-          const thresholdText = Number.isFinite(threshold)
-            ? ` · ${actionLabel} ≥ ${threshold}%`
-            : ` · ${actionLabel}`;
-
           areaEl.textContent =
-            `${areaPercent.toFixed(2)}% · ${Math.round(areaPx)} px²${thresholdText}`;
-
-          areaEl.className =
-            Number.isFinite(threshold) && areaPercent >= threshold
-              ? "good"
-              : "warn";
+            `${areaPercent.toFixed(2)}% · ${Math.round(areaPx)} px²`;
+          areaEl.className = "good";
         } else {
           areaEl.textContent = "-";
           areaEl.className = "muted";
         }
       }
 
-      // Khi luồng BẮT ĐẦU chính thức đang chạy, QR được xử lý hoàn toàn
-      // bằng protocol topic/status 0..5, không chuyển cho RobotNavigation cũ.
+      // Luồng BẮT ĐẦU chính thức dùng QR để điều khiển protocol topic/status.
       if (handleOfficialRouteQr(qr)) {
         return;
       }

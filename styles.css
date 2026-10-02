@@ -2979,3 +2979,14 @@ body.debug-mode-enabled #cameraSwitchButton {
     margin-bottom: -2px;
   }
 }
+
+/* QR-only camera debug */
+.vision-debug-grid-qr-only {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 520px) {
+  .vision-debug-grid-qr-only {
+    grid-template-columns: 1fr;
+  }
+}

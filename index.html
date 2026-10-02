@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20261002-camera-debug-visible-2"
+    href="styles.css?v=20261002-qr-only-1"
   >
 </head>
 
@@ -246,8 +246,8 @@
       >
         <div class="camera-debug-header">
           <div>
-            <b>Camera · Line Detection V2</b>
-            <small>Chấm/xanh: điểm line · xanh lá: biên thật · cam nét đứt: biên suy ra · tím nét đứt: prediction · xanh dương: center curve · hồng: look-ahead · vàng: tâm camera</small>
+            <b>Camera · QR Detection</b>
+            <small>Chỉ đọc nội dung QR và tính diện tích QR trong khung hình. Không detect hoặc vẽ line.</small>
           </div>
 
           <button
@@ -264,47 +264,9 @@
           <canvas id="visionOverlay"></canvas>
         </div>
 
-        <div class="vision-debug-grid">
-          <div><span>Line trái</span><b id="visionLeftState">-</b></div>
-          <div><span>Line phải</span><b id="visionRightState">-</b></div>
-
-          <div><span>Tâm lọc</span><b id="visionCenterState">-</b></div>
-          <div><span>Sai số lọc</span><b id="visionErrorState">-</b></div>
-
-          <div><span>Tâm raw</span><b id="visionRawCenterState">-</b></div>
-          <div><span>Sai số raw</span><b id="visionRawErrorState">-</b></div>
-
-          <div><span>Otsu threshold</span><b id="visionThresholdState">-</b></div>
-          <div><span>Lane confidence</span><b id="visionConfidenceState">-</b></div>
-
-          <div><span>Lane width</span><b id="visionLaneWidthState">-</b></div>
-          <div><span>Look-ahead X</span><b id="visionTargetState">-</b></div>
-
-          <div><span>Yellow tangent target / camera axis</span><b id="visionHeadingState">-</b></div>
-          <div><span>Curvature</span><b id="visionCurvatureState">-</b></div>
-          <div><span>Blue curve</span><b id="visionBlueCurveState">-</b></div>
-          <div><span>Steering soft</span><b id="visionGeometrySteeringState">0.00</b></div>
-          <div><span>Base logical</span><b id="visionGeometryBaseState">0</b></div>
-          <div><span>Delta logical</span><b id="visionGeometryDeltaState">0</b></div>
-          <div><span>Target curvature κ</span><b id="visionTargetCurvatureState">0</b></div>
-          <div><span>Turn ratio</span><b id="visionTurnRatioState">0</b></div>
-          <div><span>Adaptive look-ahead</span><b id="visionAdaptiveLookaheadState">0</b></div>
-          <div><span>Bán kính cua</span><b id="visionCurveRadiusState">∞</b></div>
-          <div><span>Kinematic turn</span><b id="visionKinematicTurnState">geo 0 · fb 0</b></div>
-          <div><span>Lane tracker</span><b id="visionLaneGateState">ACQUIRING</b></div>
-
+        <div class="vision-debug-grid vision-debug-grid-qr-only">
           <div><span>QR</span><b id="visionQrState">-</b></div>
           <div><span>QR diện tích</span><b id="visionQrAreaState">-</b></div>
-
-          <div><span>Motor trái gửi MQTT</span><b id="visionMotorLeftState">0</b></div>
-          <div><span>Motor phải gửi MQTT</span><b id="visionMotorRightState">0</b></div>
-          <div><span>ESP32 thực thi L/R</span><b id="visionAppliedSideState">chưa nhận</b></div>
-          <div><span>ESP32 4 motor</span><b id="visionAppliedMotorsState">chưa nhận</b></div>
-          <div><span>Firmware ESP32</span><b id="visionFirmwareBuildState">chưa nhận</b></div>
-          <div><span>Lý do motor</span><b id="visionMotorReasonState">WAITING_TASK</b></div>
-          <div><span>Publish MQTT motor</span><b id="visionMotorPublishState">-</b></div>
-          <div><span>Source build</span><b id="visionSourceBuildState">2026-09-27 · BEV Curvature V3 · Lane Lock · Track15/Lane26</b></div>
-          <div><span>Config / Vision / Navigation</span><b id="visionModuleBuildState">-</b></div>
         </div>
       </section>
 
@@ -951,10 +913,10 @@
 <script src="gemini-live.js?v=20261001-live-reconnect-vad-1"></script>
 <script src="mqtt-robot.js?v=20260930-audioworklet-1"></script>
 <script src="orientation.js?v=20260930-audioworklet-1"></script>
-<script src="vision.js?v=20260930-audioworklet-1"></script>
+<script src="vision.js?v=20261002-qr-only-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261002-camera-debug-visible-2"></script>
+<script src="robot-control.js?v=20261002-qr-only-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
