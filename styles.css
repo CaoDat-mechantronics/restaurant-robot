@@ -2706,6 +2706,35 @@ body:not(.debug-mode-enabled) .debug-only {
   background: #2d1017;
 }
 
+.manual-angle-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.manual-angle-status-card {
+  padding: 10px 12px;
+  border: 1px solid #294867;
+  border-radius: 12px;
+  background: #0d1f34;
+}
+
+.manual-angle-status-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.manual-angle-status-card b {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.1;
+}
+
 .manual-control-group-label {
   margin: 2px 0 7px;
   color: #a9bed2;
@@ -2797,6 +2826,10 @@ body:not(.debug-mode-enabled) .debug-only {
 }
 
 @media (max-width: 760px) {
+  .manual-angle-status-grid {
+    grid-template-columns: 1fr;
+  }
+
   .manual-turn-grid {
     grid-template-columns: 1fr;
   }

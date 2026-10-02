@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-01-manual-steer-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-01-manual-angle-status-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -872,6 +872,20 @@
     el.textContent = message;
     el.className = `manual-control-state${cls ? ` ${cls}` : ""}`;
   }
+  function formatManualAngle(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "0°";
+    const rounded = Math.round(num * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}°`;
+  }
+
+  function setManualAngleDisplay(target = 0, current = 0) {
+    const targetEl = $("manualTargetAngleDisplay");
+    const currentEl = $("manualCurrentAngleDisplay");
+    if (targetEl) targetEl.textContent = formatManualAngle(target);
+    if (currentEl) currentEl.textContent = formatManualAngle(current);
+  }
+
 
   function rememberManualTask() {
     const task = navigation?.task;
@@ -963,6 +977,7 @@
       Number(navConfig.TURN_TARGET_TOLERANCE_DEG) || 2
     );
 
+    setManualAngleDisplay(targetAngle, 0);
     setManualControlState(`Đang quay ${dir === "LEFT" ? "trái" : "phải"} 0/${targetAngle}°`, "warn");
     setMessage(`Manual: đang quay ${dir === "LEFT" ? "trái" : "phải"} ${targetAngle}° bằng gyro.`);
     log(`MANUAL TURN ${dir} target=${targetAngle} startYaw=${Number(startYaw).toFixed(1)}`);
@@ -984,6 +999,7 @@
 
       if (turned >= Math.max(0, targetAngle - tolerance)) {
         cancelManualTurn({ stopMotor: true });
+        setManualAngleDisplay(targetAngle, turned);
         setManualControlState(`Hoàn tất ${turned.toFixed(1)}°`, "good");
         setMessage(`Manual: đã quay ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}°.`);
         log(`MANUAL TURN DONE ${dir} angle=${turned.toFixed(1)}`);
@@ -992,6 +1008,7 @@
 
       if (performance.now() - startedAt > timeoutMs) {
         cancelManualTurn({ stopMotor: true });
+        setManualAngleDisplay(targetAngle, turned);
         setManualControlState("Timeout", "bad");
         setMessage(`Manual turn timeout trước khi đạt ${targetAngle}°.`, true);
         log(`MANUAL TURN TIMEOUT ${dir} angle=${turned.toFixed(1)}/${targetAngle}`);
@@ -1014,6 +1031,7 @@
         navigation.sendMotor(speed, -speed, true);
       }
 
+      setManualAngleDisplay(targetAngle, turned);
       setManualControlState(
         `Đang quay ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}/${targetAngle}°`,
         "warn"
@@ -1065,6 +1083,7 @@
       Number(navConfig.TURN_TARGET_TOLERANCE_DEG) || 2
     );
 
+    setManualAngleDisplay(targetAngle, 0);
     setManualControlState(`Đang rẽ ${dir === "LEFT" ? "trái" : "phải"} 0/${targetAngle}°`, "warn");
     setMessage(
       `Manual: đang rẽ ${dir === "LEFT" ? "trái" : "phải"} ${targetAngle}° ` +
@@ -1092,6 +1111,7 @@
 
       if (turned >= Math.max(0, targetAngle - tolerance)) {
         cancelManualTurn({ stopMotor: true });
+        setManualAngleDisplay(targetAngle, turned);
         setManualControlState(`Rẽ xong ${turned.toFixed(1)}°`, "good");
         setMessage(`Manual: đã rẽ ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}°.`);
         log(`MANUAL STEER DONE ${dir} angle=${turned.toFixed(1)}`);
@@ -1100,6 +1120,7 @@
 
       if (performance.now() - startedAt > timeoutMs) {
         cancelManualTurn({ stopMotor: true });
+        setManualAngleDisplay(targetAngle, turned);
         setManualControlState("Timeout", "bad");
         setMessage(`Manual steer timeout trước khi đạt ${targetAngle}°.`, true);
         log(`MANUAL STEER TIMEOUT ${dir} angle=${turned.toFixed(1)}/${targetAngle}`);
@@ -1117,6 +1138,7 @@
         navigation.sendMotor(outer, inner, true);
       }
 
+      setManualAngleDisplay(targetAngle, turned);
       setManualControlState(
         `Đang rẽ ${dir === "LEFT" ? "trái" : "phải"} ${turned.toFixed(1)}/${targetAngle}°`,
         "warn"
@@ -1163,6 +1185,7 @@
           controlState.navigationTaskKey = taskKey;
           controlState.blockedResumeTaskKey = null;
         }
+        setManualAngleDisplay(0, 0);
         setManualControlState("Đang bám line · task hiện tại", "good");
         log(`MANUAL LINE FOLLOW task=${JSON.stringify(task)}`);
       } else {
@@ -1174,6 +1197,7 @@
         navigation.updateSensors(controlState.sensors);
         navigation.start({ manual_control: true });
         setMessage("Manual: đang bám line. QR bàn/ngã rẽ sẽ không được xử lý trong chế độ test này.");
+        setManualAngleDisplay(0, 0);
         setManualControlState("Đang bám line", "good");
         log("MANUAL LINE FOLLOW without delivery task");
       }
@@ -1189,6 +1213,7 @@
   function manualStop() {
     cancelManualTurn({ stopMotor: true });
     stopEverything("manual STOP");
+    setManualAngleDisplay(0, 0);
     setManualControlState("Đã STOP", "bad");
     log("MANUAL STOP");
   }
@@ -1221,6 +1246,7 @@
 
     cancelManualTurn({ stopMotor: true });
     controlState.manualSavedTask = null;
+    setManualAngleDisplay(0, 0);
     setManualControlState("Sẵn sàng");
 
     if (navigation.state === "LINE_FOLLOW" || navigation.state === "TURNING") {
@@ -1408,6 +1434,7 @@
 
   async function boot() {
     setDebugAvailability(false);
+    setManualAngleDisplay(0, 0);
     setManualControlState("Sẵn sàng");
     updateSensorUi();
     setMqttUi("connecting");

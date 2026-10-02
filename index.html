@@ -532,6 +532,17 @@
             <span id="manualControlState" class="manual-control-state">Sẵn sàng</span>
           </div>
 
+          <div class="manual-angle-status-grid">
+            <div class="manual-angle-status-card">
+              <span>Góc đích cần quay</span>
+              <b id="manualTargetAngleDisplay">0°</b>
+            </div>
+            <div class="manual-angle-status-card">
+              <span>Góc quay được hiện tại</span>
+              <b id="manualCurrentAngleDisplay">0°</b>
+            </div>
+          </div>
+
           <div class="manual-control-group-label">Quay tại chỗ</div>
           <div class="manual-turn-grid">
             <div class="manual-turn-row">
@@ -924,7 +935,7 @@
 <script src="vision.js?v=20260930-audioworklet-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261001-manual-steer-1"></script>
+<script src="robot-control.js?v=20261001-manual-angle-status-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
