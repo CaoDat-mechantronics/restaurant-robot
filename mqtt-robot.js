@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_MQTT_BUILD = "2026-10-03-food-topic-mon-v1";
+  window.ROBOT_MQTT_BUILD = "2026-10-03-frontend-alive-probe-v1";
   class RobotMqttBridge {
     constructor({
       config,
@@ -7,6 +7,9 @@
       onSensor = () => {},
       onStatus = () => {},
       onMon = () => {},
+      onReq = () => {},
+      onRes = () => {},
+      onRobotMessage = () => {},
       onDebug = () => {}
     }) {
       this.config = config || {};
@@ -14,6 +17,9 @@
       this.onSensor = onSensor;
       this.onStatus = onStatus;
       this.onMon = onMon;
+      this.onReq = onReq;
+      this.onRes = onRes;
+      this.onRobotMessage = onRobotMessage;
       this.onDebug = onDebug;
 
       this.client = null;
@@ -120,9 +126,15 @@
         this.topic(this.robot, "status"),
         this.topic(this.robot, "sensors"),
 
-        // Cảm biến món mới do ESP32 publish trực tiếp.
+        // Cảm biến món do ESP32 publish trực tiếp.
         // Payload: {"before":0|1,"current":0|1}
-        "topic/mon"
+        "topic/mon",
+
+        // Frontend + ESP32 cùng subscribe hai topic presence mới.
+        // Frontend publish topic/req = 1 khi im lặng 30 giây.
+        // ESP32 phản hồi topic/res = 1 ngay khi nhận request.
+        "topic/req",
+        "topic/res"
       ];
 
       this.client.subscribe(topics, { qos: 0 }, (error) => {
@@ -157,28 +169,67 @@
     }
 
     handleMessage(topic, buffer) {
+      const raw = buffer.toString();
       let payload;
 
       try {
-        payload = JSON.parse(buffer.toString());
+        payload = JSON.parse(raw);
       } catch (_) {
-        this.onDebug(`MQTT non-JSON ${topic}`);
+        payload = raw;
+      }
+
+      // topic/req là request do frontend publish. Vì frontend cũng subscribe
+      // topic/req nên có thể nhận lại chính message của mình; TUYỆT ĐỐI không
+      // được tính message này là activity của ESP32.
+      if (topic === "topic/req") {
+        this.onReq(payload, topic, raw);
         return;
       }
 
-      // Cảm biến món là một topic độc lập với topicX/sensors.
-      // current = 0 -> có món, current = 1 -> không có món.
+      // Các topic dưới đây là luồng robot -> frontend trong kiến trúc hiện tại.
+      // Mọi message hợp lệ nhận được từ chúng đều reset bộ đếm alive.
+      const robotOriginTopic =
+        topic === "topic/mon" ||
+        topic === "topic/res" ||
+        topic.endsWith("/sensors") ||
+        topic.endsWith("/status");
+
+      if (robotOriginTopic) {
+        this.onRobotMessage({
+          topic,
+          payload,
+          raw,
+          receivedAt: Date.now()
+        });
+      }
+
+      if (topic === "topic/res") {
+        this.onRes(payload, topic, raw);
+        return;
+      }
+
       if (topic === "topic/mon") {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          this.onDebug(`MQTT invalid MON payload ${raw}`);
+          return;
+        }
+
         this.onMon(payload, topic);
         return;
       }
 
       if (topic.endsWith("/sensors")) {
-        this.onSensor(payload, topic);
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          this.onSensor(payload, topic);
+        }
         return;
       }
 
       if (topic.endsWith("/status")) {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+          return;
+        }
+
         this.onStatus(payload, topic);
 
         if (
@@ -197,6 +248,26 @@
         }
       }
     }
+
+    publishAliveRequest() {
+      if (!this.client || !this.connected) {
+        this.onDebug("ALIVE REQ skip: MQTT WebSocket chưa connected");
+        return false;
+      }
+
+      this.client.publish(
+        "topic/req",
+        "1",
+        {
+          qos: 0,
+          retain: false
+        }
+      );
+
+      this.onDebug("MQTT PUB topic/req payload=1");
+      return true;
+    }
+
 
     publishTask(task) {
       if (!this.client || !this.connected) {

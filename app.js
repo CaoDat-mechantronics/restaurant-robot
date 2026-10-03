@@ -23,6 +23,11 @@
 
     robots: {},
 
+    // Presence hiển thị trực tiếp từ heartbeat MQTT của frontend,
+    // không đọc field alive từ backend để quyết định UI.
+    robotAlive: {},
+    robotAliveMeta: {},
+
     statusRefreshing: false,
 
     statusRefreshTimer: null,
@@ -681,24 +686,16 @@
     return `robot_${Number(robotNumber)}`;
   }
 
-  function robotAliveLabel(status) {
-    const value =
-      String(status || "disconnected")
-        .toLowerCase();
-
-    return value === "disconnected"
-      ? "DISCONNECT"
-      : "ALIVE";
+  function robotAliveLabel(alive) {
+    return String(alive || "disconnected").toLowerCase() === "alive"
+      ? "ALIVE"
+      : "DISCONNECT";
   }
 
-  function robotAliveClass(status) {
-    const value =
-      String(status || "disconnected")
-        .toLowerCase();
-
-    return value === "disconnected"
-      ? "bad"
-      : "good";
+  function robotAliveClass(alive) {
+    return String(alive || "disconnected").toLowerCase() === "alive"
+      ? "good"
+      : "bad";
   }
 
   function robotWorkLabel(status) {
@@ -770,6 +767,49 @@
     );
   }
 
+  function selectedRobotAliveState() {
+    return String(
+      state.robotAlive[robotKey()] || "disconnected"
+    ).toLowerCase();
+  }
+
+  function renderSelectedRobotAlive() {
+    const aliveElement = $("robotAliveState");
+    if (!aliveElement) return;
+
+    const alive = selectedRobotAliveState();
+    aliveElement.textContent = robotAliveLabel(alive);
+    aliveElement.className = `robot-state ${robotAliveClass(alive)}`;
+
+    const meta = state.robotAliveMeta[robotKey()] || {};
+    const parts = [];
+
+    if (Number(meta.lastRobotMessageAt) > 0) {
+      const ageSeconds = Math.max(
+        0,
+        Math.floor((Date.now() - Number(meta.lastRobotMessageAt)) / 1000)
+      );
+      parts.push(`Robot MQTT: ${ageSeconds}s trước`);
+
+      if (meta.lastRobotTopic) {
+        parts.push(`topic: ${meta.lastRobotTopic}`);
+      }
+    } else {
+      parts.push("Chưa nhận message từ robot");
+    }
+
+    if (meta.awaitingResponse) {
+      parts.push("đang chờ phản hồi sau topic/req=1");
+    } else {
+      parts.push("probe sau 30s im lặng");
+    }
+
+    const metaElement = $("robotPresenceMeta");
+    if (metaElement) {
+      metaElement.textContent = parts.join(" · ");
+    }
+  }
+
   function renderSelectedRobotStatus() {
     const robot =
       state.robots[
@@ -785,20 +825,14 @@
     const titleElement =
       $("robotState");
 
-    const aliveElement =
-      $("robotAliveState");
-
     const workElement =
       $("robotWorkState");
 
     titleElement.textContent =
       `Robot ${state.robot}`;
 
-    aliveElement.textContent =
-      robotAliveLabel(status);
-
-    aliveElement.className =
-      `robot-state ${robotAliveClass(status)}`;
+    // Alive được render từ state local do MQTT frontend cập nhật.
+    renderSelectedRobotAlive();
 
     workElement.textContent =
       robotWorkLabel(status);
@@ -806,39 +840,8 @@
     workElement.className =
       `robot-state ${robotWorkClass(status)}`;
 
-    const meta = [];
+    // Presence meta được render bởi renderSelectedRobotAlive().
 
-    if (
-      robot.wifi_connected === true
-    ) {
-      meta.push("WiFi: connected");
-    } else if (
-      robot.wifi_connected === false
-    ) {
-      meta.push("WiFi: disconnected");
-    } else {
-      meta.push("WiFi: chưa rõ");
-    }
-
-    if (
-      Number.isFinite(
-        Number(robot.rssi)
-      )
-    ) {
-      meta.push(
-        `RSSI: ${Number(robot.rssi)} dBm`
-      );
-    }
-
-    meta.push(
-      formatHeartbeat(
-        robot.last_heartbeat
-      )
-    );
-
-    $("robotPresenceMeta")
-      .textContent =
-      meta.join(" · ");
 
     // KHÔNG cập nhật robotFoodState từ /robot-ai/status.
     // Trạng thái món trên giao diện chỉ lấy trực tiếp từ ESP32 qua topic/mon.
@@ -1411,6 +1414,37 @@
         }
       }
     );
+
+  // =====================================================
+  // FRONTEND-DRIVEN ROBOT ALIVE
+  // =====================================================
+
+  window.addEventListener(
+    "robot:alive-local",
+    (event) => {
+      const detail = event?.detail || {};
+      const robotNumber = Number(detail.robot || 0);
+      if (!robotNumber) return;
+
+      const key = robotKey(robotNumber);
+      state.robotAlive[key] =
+        String(detail.alive || "disconnected").toLowerCase() === "alive"
+          ? "alive"
+          : "disconnected";
+
+      state.robotAliveMeta[key] = {
+        lastRobotMessageAt: Number(detail.lastRobotMessageAt || 0),
+        lastRobotTopic: String(detail.lastRobotTopic || ""),
+        awaitingResponse: Boolean(detail.awaitingResponse),
+        probeSentAt: Number(detail.probeSentAt || 0),
+        reason: String(detail.reason || "")
+      };
+
+      if (robotNumber === Number(state.robot)) {
+        renderSelectedRobotAlive();
+      }
+    }
+  );
 
   // =====================================================
   // ROBOT EYES FOLLOW POINTER

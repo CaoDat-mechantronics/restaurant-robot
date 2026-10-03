@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-03-food-topic-mon-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-03-frontend-alive-probe-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -23,6 +23,18 @@
     orientationPermissionReady: false,
     cameraPermissionReady: false,
     robotStatus: "disconnected",
+
+    // Presence mới do frontend xác định trực tiếp từ MQTT ESP32.
+    // Mặc định là disconnected cho tới khi nhận được message từ robot.
+    alive: "disconnected",
+    lastSyncedAlive: "disconnected",
+    lastRobotMessageAt: 0,
+    lastRobotTopic: "",
+    aliveMonitorStartedAt: 0,
+    aliveNextProbeAt: 0,
+    aliveProbeSentAt: 0,
+    aliveMonitorTimer: null,
+
     cameraDebugOpen: false,
 
     // Điều khiển manual trong bảng Debug.
@@ -190,6 +202,173 @@
     }
   }
 
+  const ALIVE_SILENCE_BEFORE_PROBE_MS = 30000;
+  const ALIVE_RESPONSE_TIMEOUT_MS = 15000;
+  const ALIVE_MONITOR_TICK_MS = 1000;
+
+  function emitAliveUiState(reason = "") {
+    window.dispatchEvent(
+      new CustomEvent(
+        "robot:alive-local",
+        {
+          detail: {
+            robot: controlState.robot,
+            alive: controlState.alive,
+            lastRobotMessageAt: controlState.lastRobotMessageAt || 0,
+            lastRobotTopic: controlState.lastRobotTopic || "",
+            probeSentAt: controlState.aliveProbeSentAt || 0,
+            awaitingResponse: controlState.aliveProbeSentAt > 0,
+            reason
+          }
+        }
+      )
+    );
+  }
+
+  async function syncAliveStateToBackend(alive) {
+    const normalized =
+      String(alive || "disconnected").toLowerCase() === "alive"
+        ? "alive"
+        : "disconnected";
+
+    // Database mặc định disconnected. Chỉ gọi API khi frontend thấy state đổi.
+    if (controlState.lastSyncedAlive === normalized) {
+      return;
+    }
+
+    if (!token()) {
+      log(`ALIVE DB skip: chưa đăng nhập, alive=${normalized}`);
+      return;
+    }
+
+    try {
+      const result = await api(
+        "/robot-ai/alive-state",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            robot: controlState.robot,
+            alive: normalized
+          })
+        }
+      );
+
+      controlState.lastSyncedAlive = normalized;
+
+      log(
+        `ALIVE DB alive=${normalized}` +
+        (result?.changed != null ? ` changed=${Boolean(result.changed)}` : "")
+      );
+    }
+    catch (error) {
+      log(`ALIVE DB sync error: ${error.message}`);
+    }
+  }
+
+  function setLocalAlive(nextAlive, reason = "") {
+    const normalized = nextAlive === "alive" ? "alive" : "disconnected";
+    const previous = controlState.alive;
+
+    controlState.alive = normalized;
+    emitAliveUiState(reason);
+
+    if (previous !== normalized) {
+      log(`ALIVE ${previous} -> ${normalized} | ${reason}`);
+      void syncAliveStateToBackend(normalized);
+    }
+  }
+
+  function recordRobotActivity({ topic, receivedAt = Date.now() } = {}) {
+    const now = Number(receivedAt) || Date.now();
+
+    controlState.lastRobotMessageAt = now;
+    controlState.lastRobotTopic = String(topic || "unknown");
+
+    // Bất kỳ message robot -> frontend nào trong thời gian chờ response đều
+    // được coi là xác nhận robot còn sống, không bắt buộc phải là topic/res.
+    controlState.aliveProbeSentAt = 0;
+    controlState.aliveNextProbeAt = now + ALIVE_SILENCE_BEFORE_PROBE_MS;
+
+    setLocalAlive("alive", `RX ${controlState.lastRobotTopic}`);
+  }
+
+  function startAliveMonitor() {
+    const now = Date.now();
+
+    if (!controlState.aliveMonitorStartedAt) {
+      controlState.aliveMonitorStartedAt = now;
+    }
+
+    if (!controlState.aliveNextProbeAt) {
+      const anchor =
+        controlState.lastRobotMessageAt ||
+        controlState.aliveMonitorStartedAt;
+
+      controlState.aliveNextProbeAt =
+        anchor + ALIVE_SILENCE_BEFORE_PROBE_MS;
+    }
+
+    if (controlState.aliveMonitorTimer) {
+      emitAliveUiState("MQTT connected");
+      return;
+    }
+
+    controlState.aliveMonitorTimer = window.setInterval(
+      serviceAliveMonitor,
+      ALIVE_MONITOR_TICK_MS
+    );
+
+    emitAliveUiState("Alive monitor started");
+  }
+
+  function serviceAliveMonitor() {
+    const now = Date.now();
+
+    // Đang chờ phản hồi cho topic/req = 1.
+    if (controlState.aliveProbeSentAt > 0) {
+      if (
+        now - controlState.aliveProbeSentAt >=
+        ALIVE_RESPONSE_TIMEOUT_MS
+      ) {
+        controlState.aliveProbeSentAt = 0;
+        controlState.aliveNextProbeAt =
+          now + ALIVE_SILENCE_BEFORE_PROBE_MS;
+
+        setLocalAlive(
+          "disconnected",
+          "Không nhận được message robot trong 15s sau topic/req=1"
+        );
+      } else {
+        emitAliveUiState("Đang chờ phản hồi robot");
+      }
+
+      return;
+    }
+
+    if (
+      controlState.aliveNextProbeAt > 0 &&
+      now >= controlState.aliveNextProbeAt
+    ) {
+      // Gửi đúng 1 request cho một chu kỳ im lặng. Sau đó chờ tối đa 15 giây.
+      mqttBridge.publishAliveRequest();
+      controlState.aliveProbeSentAt = now;
+      controlState.aliveNextProbeAt = 0;
+
+      emitAliveUiState("Đã gửi topic/req=1");
+      return;
+    }
+
+    // Chỉ để UI cập nhật tuổi của message cuối, không gọi API.
+    emitAliveUiState("Alive monitor tick");
+  }
+
+  function stopAliveMonitor() {
+    if (controlState.aliveMonitorTimer) {
+      clearInterval(controlState.aliveMonitorTimer);
+      controlState.aliveMonitorTimer = null;
+    }
+  }
+
   function setMqttUi(state) {
     const el = $("mqttWsState");
     if (!el) return;
@@ -206,6 +385,10 @@
     const [text, cls] = map[state] || [String(state), "muted"];
     el.textContent = text;
     el.className = cls;
+
+    if (state === "connected") {
+      startAliveMonitor();
+    }
   }
 
   function updateSensorUi() {
@@ -287,6 +470,21 @@
   const mqttBridge = new window.RobotMqttBridge({
     config,
     onState: setMqttUi,
+
+    onRobotMessage: (message) => {
+      recordRobotActivity(message);
+    },
+
+    onReq: (payload, topic) => {
+      // Frontend cũng subscribe topic/req nên sẽ nhận lại request do chính nó
+      // publish. Không được tính đây là message từ robot.
+      log(`MQTT RX ${topic} payload=${JSON.stringify(payload)} (ignore for alive)`);
+    },
+
+    onRes: (payload, topic) => {
+      log(`MQTT RX ${topic} payload=${JSON.stringify(payload)}`);
+    },
+
     onSensor: (payload) => {
       // topicX/sensors chỉ còn cập nhật các cảm biến cũ.
       // Tuyệt đối không lấy has_food từ payload.has_food hoặc ir5 nữa.
@@ -2084,6 +2282,17 @@
     };
     updateSensorUi();
 
+    // Presence local được tính lại cho robot vừa chọn.
+    controlState.alive = "disconnected";
+    controlState.lastSyncedAlive = "disconnected";
+    controlState.lastRobotMessageAt = 0;
+    controlState.lastRobotTopic = "";
+    controlState.aliveProbeSentAt = 0;
+    controlState.aliveMonitorStartedAt = Date.now();
+    controlState.aliveNextProbeAt =
+      controlState.aliveMonitorStartedAt + ALIVE_SILENCE_BEFORE_PROBE_MS;
+    emitAliveUiState("Robot selection changed");
+
     mqttBridge.switchRobot(next);
     log(`CONTROL SELECT Robot ${next}`);
   }
@@ -2273,6 +2482,7 @@
   window.addEventListener("beforeunload", () => {
     cancelManualTurn({ sendStop: true, clearStorage: true });
     vision.stop();
+    stopAliveMonitor();
     mqttBridge.close();
   });
 
