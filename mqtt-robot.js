@@ -1,17 +1,19 @@
 (() => {
-  window.ROBOT_MQTT_BUILD = "2026-09-27-4motor-mqtt-v1";
+  window.ROBOT_MQTT_BUILD = "2026-10-03-food-topic-mon-v1";
   class RobotMqttBridge {
     constructor({
       config,
       onState = () => {},
       onSensor = () => {},
       onStatus = () => {},
+      onMon = () => {},
       onDebug = () => {}
     }) {
       this.config = config || {};
       this.onState = onState;
       this.onSensor = onSensor;
       this.onStatus = onStatus;
+      this.onMon = onMon;
       this.onDebug = onDebug;
 
       this.client = null;
@@ -116,7 +118,11 @@
 
       const topics = [
         this.topic(this.robot, "status"),
-        this.topic(this.robot, "sensors")
+        this.topic(this.robot, "sensors"),
+
+        // Cảm biến món mới do ESP32 publish trực tiếp.
+        // Payload: {"before":0|1,"current":0|1}
+        "topic/mon"
       ];
 
       this.client.subscribe(topics, { qos: 0 }, (error) => {
@@ -157,6 +163,13 @@
         payload = JSON.parse(buffer.toString());
       } catch (_) {
         this.onDebug(`MQTT non-JSON ${topic}`);
+        return;
+      }
+
+      // Cảm biến món là một topic độc lập với topicX/sensors.
+      // current = 0 -> có món, current = 1 -> không có món.
+      if (topic === "topic/mon") {
+        this.onMon(payload, topic);
         return;
       }
 

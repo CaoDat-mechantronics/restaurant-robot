@@ -79,7 +79,7 @@ QUY TẮC BẮT BUỘC:
 8. Sau prepare_delivery thành công, nói rõ:
    - nhiệm vụ đã được nhận;
    - hãy đặt món lên robot;
-   - robot chỉ bắt đầu dispatch khi cảm biến IR5 báo đã có món.
+   - robot chỉ bắt đầu dispatch khi cảm biến món của ESP32 (topic/mon) báo đã có món.
 
 9. Nếu người dùng đổi món hoặc đổi bàn trước khi xác nhận, phải gọi check_table_food lại.
 
@@ -117,7 +117,7 @@ QUY TẮC BẮT BUỘC:
           {
             name: "prepare_delivery",
             description:
-              "Sau khi người dùng xác nhận, ghi nhận nhiệm vụ giao món ở frontend và chờ IR5 phát hiện món. Tool này không dispatch database và không publish MQTT.",
+              "Sau khi người dùng xác nhận, ghi nhận nhiệm vụ giao món ở frontend và chờ cảm biến món của ESP32 qua topic/mon phát hiện món. Tool này không dispatch database và không publish MQTT.",
             parameters: {
               type: "OBJECT",
               properties: {
@@ -713,7 +713,7 @@ QUY TẮC BẮT BUỘC:
         table: checkedTable,
         food_name: checked.item.food_name,
         route: checked.route,
-        message: "Đã nhận nhiệm vụ. Đang chờ IR5 xác nhận món đã được đặt lên robot."
+        message: "Đã nhận nhiệm vụ. Đang chờ cảm biến món của ESP32 xác nhận món đã được đặt lên robot."
       };
     }
 

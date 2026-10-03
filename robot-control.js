@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-03-qr-area-uturn-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-03-food-topic-mon-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -14,7 +14,10 @@
       ir5: false,
       has_food: false
     },
-    lastSyncedHasFood: null,
+    // Database mặc định has_food=false.
+    // Frontend cũng mặc định KHÔNG CÓ MÓN cho tới khi robot gửi topic/mon.
+    // Giá trị này chỉ dùng để tránh gọi API lưu trữ lặp lại.
+    lastSyncedHasFood: false,
     currentDispatch: null,
     latestTask: null,
     orientationPermissionReady: false,
@@ -285,23 +288,67 @@
     config,
     onState: setMqttUi,
     onSensor: (payload) => {
-      const hasFood =
-        payload.has_food != null
-          ? Boolean(payload.has_food)
-          : Boolean(payload.ir5);
-
+      // topicX/sensors chỉ còn cập nhật các cảm biến cũ.
+      // Tuyệt đối không lấy has_food từ payload.has_food hoặc ir5 nữa.
+      // has_food chỉ do topic/mon từ ESP32 quyết định.
       controlState.sensors = {
+        ...controlState.sensors,
         ir2: Boolean(payload.ir2),
         ir3: Boolean(payload.ir3),
-        ir5: Boolean(payload.ir5),
+        ir5: Boolean(payload.ir5)
+      };
+
+      updateSensorUi();
+      navigation?.updateSensors(controlState.sensors);
+    },
+
+    onMon: (payload, topic) => {
+      const before = Number(payload?.before);
+      const current = Number(payload?.current);
+
+      // ESP32 chỉ được gửi 0 hoặc 1.
+      if (
+        ![0, 1].includes(before) ||
+        ![0, 1].includes(current)
+      ) {
+        log(
+          `MON payload không hợp lệ topic=${topic} payload=${JSON.stringify(payload)}`
+        );
+        return;
+      }
+
+      // Nguồn sự thật của giao diện là current do ESP32 gửi:
+      //   current = 0 -> vật che cảm biến -> CÓ MÓN
+      //   current = 1 -> không bị che      -> KHÔNG CÓ MÓN
+      //
+      // Không return khi before === current vì message khởi động có thể là:
+      //   {before:1,current:1} -> KHÔNG CÓ MÓN
+      //   {before:0,current:0} -> CÓ MÓN
+      const hasFood = current === 0;
+      const previousHasFood = controlState.sensors.has_food;
+
+      // Cập nhật giao diện NGAY từ robot, không đọc has_food từ backend.
+      controlState.sensors = {
+        ...controlState.sensors,
         has_food: hasFood
       };
 
       updateSensorUi();
       navigation?.updateSensors(controlState.sensors);
 
-      syncHasFood(hasFood);
+      log(
+        `MON ${before} -> ${current} | has_food=${hasFood}` +
+        (previousHasFood !== hasFood ? " | UI_CHANGED" : " | UI_SAME")
+      );
 
+      // Backend chỉ là nơi lưu trữ trạng thái gần nhất.
+      // Hàm này tự bỏ qua nếu trạng thái đã được sync thành công trước đó.
+      // Vì lastSyncedHasFood mặc định false:
+      //   startup 1->1 => không gọi API;
+      //   startup 0->0 => gọi API true để lưu trạng thái có món.
+      void syncFoodStateFromRobot(hasFood);
+
+      // Nếu đang có nhiệm vụ chờ đặt món, topic/mon là trigger duy nhất.
       if (
         controlState.pendingDelivery &&
         hasFood &&
@@ -310,6 +357,7 @@
         commitPendingDelivery();
       }
     },
+
     onStatus: (payload) => {
       if (payload?.type === "command_ack") {
         log(
@@ -384,32 +432,42 @@
     onDebug: log
   });
 
-  async function syncHasFood(hasFood) {
-    if (controlState.lastSyncedHasFood === hasFood) {
+  async function syncFoodStateFromRobot(hasFood) {
+    const normalized = Boolean(hasFood);
+
+    // Chống gọi API lặp lại khi ESP32 gửi lại cùng trạng thái.
+    if (controlState.lastSyncedHasFood === normalized) {
       return;
     }
 
-    controlState.lastSyncedHasFood = hasFood;
-
     if (!token()) {
+      log(`FOOD DB skip: chưa đăng nhập, has_food=${normalized}`);
       return;
     }
 
     try {
-      await api(
-        "/robot-ai/sensor-state",
+      const result = await api(
+        "/robot-ai/food-state",
         {
           method: "POST",
           body: JSON.stringify({
             robot: controlState.robot,
-            has_food: hasFood
+            has_food: normalized
           })
         }
       );
-      log(`DB has_food=${hasFood}`);
+
+      // Chỉ ghi nhận đã sync sau khi API thành công.
+      // Nếu API lỗi, lần topic/mon kế tiếp cùng trạng thái vẫn có thể retry.
+      controlState.lastSyncedHasFood = normalized;
+
+      log(
+        `FOOD DB has_food=${normalized}` +
+        (result?.changed != null ? ` changed=${Boolean(result.changed)}` : "")
+      );
     }
     catch (error) {
-      log(`SYNC has_food error: ${error.message}`);
+      log(`FOOD DB sync error: ${error.message}`);
     }
   }
 
@@ -431,10 +489,10 @@
       text.textContent =
         `${controlState.pendingDelivery.food_name} · bàn ${controlState.pendingDelivery.table_number} · ` +
         `Line ${route.line ?? "-"} · ${route.junction_turn_vi || route.junction_turn || "-"}. ` +
-        `Đang chờ IR5 = 1.`;
+        `Đang chờ cảm biến món từ ESP32.`;
     }
 
-    setMessage("Đã nhận nhiệm vụ. Hãy đặt món lên robot; IR5 sẽ kích hoạt dispatch.");
+    setMessage("Đã nhận nhiệm vụ. Hãy đặt món lên robot; topic/mon từ ESP32 sẽ kích hoạt dispatch.");
     log(`PENDING ${JSON.stringify(controlState.pendingDelivery)}`);
 
     if (controlState.sensors.has_food && !controlState.dispatching) {
@@ -449,7 +507,7 @@
     }
 
     if (!mqttBridge.connected) {
-      setMessage("IR5 đã có món nhưng MQTT WebSocket chưa connected.", true);
+      setMessage("Cảm biến món báo CÓ MÓN nhưng MQTT WebSocket chưa connected.", true);
       return;
     }
 
@@ -2015,7 +2073,9 @@
     controlState.navigationStarting = false;
     controlState.navigationTaskKey = null;
     controlState.blockedResumeTaskKey = null;
-    controlState.lastSyncedHasFood = null;
+    // Robot mới được chọn bắt đầu với giả định database/UI là chưa có món.
+    // topic/mon của ESP32 sẽ cập nhật lại ngay khi có message.
+    controlState.lastSyncedHasFood = false;
     controlState.sensors = {
       ir2: false,
       ir3: false,

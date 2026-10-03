@@ -536,7 +536,7 @@
     // ===============================================
     // PREPARE DELIVERY
     // Gemini chỉ nhận nhiệm vụ. Chưa dispatch database/MQTT.
-    // RobotControl sẽ chờ IR5 = true rồi mới thực hiện dispatch.
+    // RobotControl sẽ chờ topic/mon từ ESP32 báo current=0 rồi mới thực hiện dispatch.
     // ===============================================
 
     if (
@@ -796,17 +796,9 @@
       .textContent =
       meta.join(" · ");
 
-    const foodState = $("robotFoodState");
-    if (foodState) {
-      foodState.textContent =
-        robot.has_food === true
-          ? "CÓ MÓN"
-          : "KHÔNG CÓ MÓN";
-      foodState.className =
-        robot.has_food === true
-          ? "good"
-          : "muted";
-    }
+    // KHÔNG cập nhật robotFoodState từ /robot-ai/status.
+    // Trạng thái món trên giao diện chỉ lấy trực tiếp từ ESP32 qua topic/mon.
+    // Backend/Firebase chỉ lưu trữ has_food và không được ghi đè UI.
 
     // Thông báo cho robot-control.js biết status mới nhất để
     // bật/tắt nút DEBUG CAMERA.

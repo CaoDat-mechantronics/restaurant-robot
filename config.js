@@ -11,7 +11,7 @@ window.APP_CONFIG = {
   // HIVEMQ CLOUD - FRONTEND MQTT OVER WEBSOCKET
   // =====================================================
   // Nên tạo 1 MQTT user riêng cho frontend, chỉ cấp quyền:
-  // SUB: topic1/status, topic1/sensors, topic2/status, topic2/sensors
+  // SUB: topic1/status, topic1/sensors, topic2/status, topic2/sensors, topic/mon
   // PUB: topic1/task, topic1/motor, topic2/task, topic2/motor
   MQTT_WS_URL: "wss://20d0e023b23d4286a0527539aafdfe1e.s1.eu.hivemq.cloud:8884/mqtt",
   MQTT_USERNAME: "dat.cao",
