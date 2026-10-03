@@ -429,10 +429,17 @@ window.APP_CONFIG = {
     TURN_MAX_DEG: 112,
 
     // ---------------------------------------------------
+    // NGƯỠNG QR DÙNG ĐỂ RA QUYẾT ĐỊNH ĐIỀU KHIỂN
+    // ---------------------------------------------------
+    // Chỉ QR có diện tích >= giá trị này (% diện tích frame camera)
+    // mới được phép kích hoạt hành động tại nga_re hoặc ban_<số bàn>.
+    // Có thể chỉnh duy nhất biến này khi cần tăng/giảm độ gần của QR.
+    QR_ACTION_MIN_AREA_PERCENT: 1.45,
+
+    // ---------------------------------------------------
     // QR BÀN ĐÍCH
     // ---------------------------------------------------
-    // Ví dụ task.table = 3 -> web chờ QR "ban_3".
-    // Khi QR chiếm >= 4% khung QR thì dừng hẳn và chuyển ARRIVED.
+    // Legacy cho navigation cũ; luồng BẮT ĐẦU mới dùng QR_ACTION_MIN_AREA_PERCENT ở trên.
     TABLE_QR_PREFIX: "ban_",
     TABLE_QR_STOP_AREA_PERCENT: 4,
     TABLE_QR_STABLE_COUNT: 1,
@@ -440,9 +447,7 @@ window.APP_CONFIG = {
     // ---------------------------------------------------
     // QR NGÃ RẼ
     // ---------------------------------------------------
-    // Giữ ngưỡng 12% từ thuật toán cũ để tránh quay quá sớm.
-    // Khi thấy "nga_re" đủ lớn, web dừng tạm rồi dùng junction_turn
-    // của task để quay LEFT/RIGHT 90° bằng gyro.
+    // Legacy cho navigation cũ; luồng BẮT ĐẦU mới dùng QR_ACTION_MIN_AREA_PERCENT ở trên.
     JUNCTION_QR_TEXT: "nga_re",
     JUNCTION_QR_STABLE_COUNT: 2,
     JUNCTION_QR_TRIGGER_AREA_PERCENT: 12,

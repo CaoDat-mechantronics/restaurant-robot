@@ -1,5 +1,5 @@
 (() => {
-  window.ROBOT_CONTROL_BUILD = "2026-10-02-qr-only-v1";
+  window.ROBOT_CONTROL_BUILD = "2026-10-03-qr-area-uturn-v1";
   const $ = (id) => document.getElementById(id);
   const config = window.APP_CONFIG || {};
   const navConfig = config.NAVIGATION || {};
@@ -746,7 +746,8 @@
   //   - gửi "3" để ESP32 bám line
   //   - nếu gặp QR nga_re: STOP -> quay trái/phải 1/2 theo route + turnAngle
   //   - đạt góc: STOP -> gửi lại "3"
-  //   - gặp QR ban_<table>: STOP và kết thúc
+  //   - QR chỉ kích hoạt hành động khi areaPercent >= QR_ACTION_MIN_AREA_PERCENT
+  //   - gặp QR ban_<table>: STOP -> quay đầu bằng uTurnAngle theo hướng ngược hướng rẽ -> STOP
   // =========================================================
 
   // Snapshot tạm của nhiệm vụ được lấy trực tiếp từ backend khi bấm BẮT ĐẦU.
@@ -841,6 +842,7 @@
     targetTableQr: "",
     turnDirection: null,
     turnAngle: 90,
+    uTurnAngle: 180,
     junctionHandled: false,
     tableStopSent: false,
     startYaw: null,
@@ -871,6 +873,25 @@
       }
     } catch (_) {}
     return 90;
+  }
+
+  function readOfficialUTurnAngle() {
+    try {
+      const raw = localStorage.getItem("robot_setting_official");
+      const saved = raw ? JSON.parse(raw) : null;
+      const angle = Number(saved?.uTurnAngle);
+      if (Number.isFinite(angle)) {
+        return Math.max(1, Math.min(360, angle));
+      }
+    } catch (_) {}
+    return 180;
+  }
+
+  // Một biến duy nhất để chỉnh ngưỡng kích thước QR kích hoạt hành động.
+  // Giá trị là phần trăm diện tích QR so với toàn frame camera.
+  function getQrActionMinAreaPercent() {
+    const value = Number(navConfig.QR_ACTION_MIN_AREA_PERCENT);
+    return Number.isFinite(value) && value >= 0 ? value : 1.45;
   }
 
   function parseTableNumber(value) {
@@ -923,6 +944,7 @@
       turnDirection: normalizeRouteTurn(turnRaw),
       turnRaw: String(turnRaw || ""),
       turnAngle: readOfficialTurnAngle(),
+      uTurnAngle: readOfficialUTurnAngle(),
       task: { ...storedTask }
     };
   }
@@ -959,6 +981,7 @@
     officialRouteSession.targetTableQr = "";
     officialRouteSession.turnDirection = null;
     officialRouteSession.turnAngle = 90;
+    officialRouteSession.uTurnAngle = 180;
     officialRouteSession.junctionHandled = false;
     officialRouteSession.tableStopSent = false;
     officialRouteSession.startYaw = null;
@@ -1004,19 +1027,152 @@
     officialRouteSession.tableStopSent = true;
     officialRouteSession.phase = "stopping_at_table";
     const table = officialRouteSession.targetTable;
+    const junctionDirection = officialRouteSession.turnDirection;
+
+    // Quy tắc quay đầu tại bàn:
+    //   route rẽ LEFT  -> tới bàn quay đầu RIGHT
+    //   route rẽ RIGHT -> tới bàn quay đầu LEFT
+    const uTurnDirection = junctionDirection === "LEFT"
+      ? "RIGHT"
+      : junctionDirection === "RIGHT"
+        ? "LEFT"
+        : null;
 
     try {
+      // Luôn STOP ngay khi QR bàn đích đủ lớn.
       await publishStatusCommandAsync(DEBUG_COMMAND.STOP);
       log(`OFFICIAL ROUTE TABLE STOP qr=${qrText} table=${table}`);
-      setMessage(`Đã thấy ${qrText}. Robot đã dừng tại bàn ${table}.`);
-      try { vision.stop(); } catch (_) {}
-      resetOfficialRouteSession({ keepButtonMessage: true });
+
+      if (!uTurnDirection) {
+        setMessage(
+          `Đã thấy ${qrText} và STOP tại bàn ${table}, nhưng nhiệm vụ không có hướng ngã rẽ để xác định chiều quay đầu.`,
+          true
+        );
+        try { vision.stop(); } catch (_) {}
+        resetOfficialRouteSession({ keepButtonMessage: true });
+        return;
+      }
+
+      // Sau khi dừng ở bàn, quay đầu theo hướng NGƯỢC với hướng rẽ ở ngã rẽ.
+      await runOfficialTableUTurn(uTurnDirection, qrText);
     } catch (error) {
       officialRouteSession.tableStopSent = false;
       officialRouteSession.phase = "line_follow";
-      setMessage(`Đã thấy ${qrText} nhưng gửi STOP lỗi: ${error.message}`, true);
-      setOfficialStartButtonState(true, "Lỗi STOP bàn");
+      setMessage(`Đã thấy ${qrText} nhưng xử lý tại bàn lỗi: ${error.message}`, true);
+      setOfficialStartButtonState(true, "Lỗi xử lý bàn");
     }
+  }
+
+  async function runOfficialTableUTurn(direction, qrText) {
+    if (!officialRouteSession.active) return;
+
+    const sessionToken = officialRouteSession.token;
+    const targetAngle = officialRouteSession.uTurnAngle;
+    const table = officialRouteSession.targetTable;
+
+    if (direction !== "LEFT" && direction !== "RIGHT") {
+      throw new Error("Không xác định được chiều quay đầu tại bàn.");
+    }
+
+    officialRouteSession.phase = "table_uturn_prepare";
+    setMessage(
+      `Đã dừng tại bàn ${table}. Chuẩn bị quay đầu ${direction === "LEFT" ? "trái" : "phải"} ${targetAngle}°.`
+    );
+
+    const startYaw = await waitForYaw(2200);
+    if (startYaw == null) {
+      throw new Error("Không đọc được gyroscope để lấy góc bắt đầu quay đầu.");
+    }
+    if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) return;
+
+    officialRouteSession.startYaw = Number(startYaw);
+    officialRouteSession.previousYaw = Number(startYaw);
+    officialRouteSession.angleTurned = 0;
+    officialRouteSession.phase = "table_uturn";
+
+    const turnCommand = direction === "LEFT"
+      ? DEBUG_COMMAND.TURN_LEFT
+      : DEBUG_COMMAND.TURN_RIGHT;
+
+    await publishStatusCommandAsync(turnCommand);
+    if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) return;
+
+    log(
+      `OFFICIAL ROUTE TABLE UTURN START qr=${qrText} table=${table} ` +
+      `direction=${direction} command=${turnCommand} target=${targetAngle} ` +
+      `startYaw=${Number(startYaw).toFixed(1)}`
+    );
+
+    const startedAt = performance.now();
+    const timeoutMs = Math.max(15000, targetAngle * 350);
+
+    clearOfficialTurnTimer();
+    officialRouteSession.turnTimer = window.setInterval(async () => {
+      if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) {
+        clearOfficialTurnTimer();
+        return;
+      }
+      if (officialRouteSession.phase !== "table_uturn") return;
+
+      const yaw = orientation.getYaw();
+      if (yaw == null || officialRouteSession.previousYaw == null) return;
+
+      const delta = window.RobotOrientation.deltaDegrees(
+        Number(yaw),
+        Number(officialRouteSession.previousYaw)
+      );
+      officialRouteSession.previousYaw = Number(yaw);
+
+      const deltaAbs = Math.abs(Number(delta) || 0);
+      if (deltaAbs >= 0.08 && deltaAbs <= 45) {
+        officialRouteSession.angleTurned += deltaAbs;
+      }
+
+      const turned = officialRouteSession.angleTurned;
+      setMessage(
+        `Đang quay đầu ${direction === "LEFT" ? "trái" : "phải"}: ` +
+        `${turned.toFixed(1)}/${targetAngle}°.`
+      );
+
+      if (turned >= targetAngle) {
+        officialRouteSession.phase = "table_uturn_complete";
+        clearOfficialTurnTimer();
+
+        try {
+          await publishStatusCommandAsync(DEBUG_COMMAND.STOP);
+          if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) return;
+
+          log(
+            `OFFICIAL ROUTE TABLE UTURN DONE table=${table} ` +
+            `direction=${direction} angle=${turned.toFixed(1)}/${targetAngle}`
+          );
+          setMessage(
+            `Đã tới bàn ${table} và quay đầu ${direction === "LEFT" ? "trái" : "phải"} ` +
+            `${turned.toFixed(1)}°. Robot đang STOP.`
+          );
+          try { vision.stop(); } catch (_) {}
+          resetOfficialRouteSession({ keepButtonMessage: true });
+        } catch (error) {
+          officialRouteSession.phase = "error";
+          officialRouteSession.active = false;
+          setOfficialStartButtonState(false, "Lỗi STOP sau quay đầu");
+          setMessage(`Quay đầu xong nhưng gửi STOP lỗi: ${error.message}`, true);
+        }
+        return;
+      }
+
+      if (performance.now() - startedAt > timeoutMs) {
+        clearOfficialTurnTimer();
+        officialRouteSession.phase = "error";
+        try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
+        officialRouteSession.active = false;
+        setOfficialStartButtonState(false, "Timeout quay đầu");
+        setMessage(
+          `Timeout quay đầu: ${turned.toFixed(1)}/${targetAngle}°. Đã gửi STOP.`,
+          true
+        );
+      }
+    }, 50);
   }
 
   async function runOfficialJunctionTurn() {
@@ -1165,16 +1321,35 @@
     if (!officialRouteSession.active) return false;
 
     const text = String(qr?.text || "").trim().toLowerCase();
+    const areaPercent = Number(qr?.areaPercent);
     if (!text) return true;
 
-    // Trong lúc quay, không xử lý thêm QR nào để tránh lặp lệnh.
+    // Trong lúc đang quay/rẽ/quay đầu, không xử lý thêm QR để tránh lặp lệnh.
     if (officialRouteSession.phase === "turning" ||
         officialRouteSession.phase === "junction_stop" ||
-        officialRouteSession.phase === "turn_complete") {
+        officialRouteSession.phase === "turn_complete" ||
+        officialRouteSession.phase === "table_uturn_prepare" ||
+        officialRouteSession.phase === "table_uturn" ||
+        officialRouteSession.phase === "table_uturn_complete" ||
+        officialRouteSession.phase === "stopping_at_table") {
+      return true;
+    }
+
+    // Chỉ những QR có kích thước đủ lớn mới được phép gây hành động điều khiển.
+    // QR nhỏ hơn ngưỡng vẫn được detect/vẽ khung đỏ để debug nhưng bị bỏ qua.
+    const minAreaPercent = getQrActionMinAreaPercent();
+    if (!Number.isFinite(areaPercent) || areaPercent < minAreaPercent) {
+      if (text === "nga_re" || text === officialRouteSession.targetTableQr) {
+        log(
+          `OFFICIAL QR IGNORE text=${text} area=${Number.isFinite(areaPercent) ? areaPercent.toFixed(2) : "?"}% ` +
+          `< min=${minAreaPercent.toFixed(2)}%`
+        );
+      }
       return true;
     }
 
     if (text === officialRouteSession.targetTableQr) {
+      log(`OFFICIAL QR TABLE ACCEPT text=${text} area=${areaPercent.toFixed(2)}%`);
       void stopOfficialRouteAtTable(text);
       return true;
     }
@@ -1184,6 +1359,7 @@
       officialRouteSession.junctionHandled === false
     ) {
       officialRouteSession.junctionHandled = true;
+      log(`OFFICIAL QR JUNCTION ACCEPT text=${text} area=${areaPercent.toFixed(2)}%`);
       void runOfficialJunctionTurn();
       return true;
     }
@@ -1244,6 +1420,7 @@
     officialRouteSession.targetTableQr = `ban_${routeInfo.table}`;
     officialRouteSession.turnDirection = routeInfo.turnDirection;
     officialRouteSession.turnAngle = routeInfo.turnAngle;
+    officialRouteSession.uTurnAngle = routeInfo.uTurnAngle;
     officialRouteSession.junctionHandled = false;
     officialRouteSession.tableStopSent = false;
 
@@ -1265,13 +1442,16 @@
         ? `; tại nga_re sẽ quay ${routeInfo.turnDirection === "LEFT" ? "trái" : "phải"} ${routeInfo.turnAngle}°`
         : "";
 
+      const qrMinArea = getQrActionMinAreaPercent();
       setMessage(
         `Đã bắt đầu: camera sau + BÁM LINE (3). ` +
-        `Đích ${officialRouteSession.targetTableQr}${turnText}.`
+        `Đích ${officialRouteSession.targetTableQr}${turnText}. ` +
+        `QR chỉ kích hoạt khi diện tích ≥ ${qrMinArea.toFixed(2)}%.`
       );
       log(
         `OFFICIAL ROUTE START table=${routeInfo.table} ` +
-        `turn=${routeInfo.turnDirection || "NONE"} angle=${routeInfo.turnAngle}`
+        `turn=${routeInfo.turnDirection || "NONE"} turnAngle=${routeInfo.turnAngle} ` +
+        `uTurnAngle=${routeInfo.uTurnAngle} qrMinArea=${qrMinArea}`
       );
     } catch (error) {
       try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
