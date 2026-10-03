@@ -1544,6 +1544,47 @@ pre {
    ROBOT HEARTBEAT / CURRENT TASK
    ========================================================= */
 
+
+.robot-title-state {
+  display: block;
+
+  line-height: 1.35;
+
+  overflow-wrap: anywhere;
+}
+
+.robot-state-split {
+  margin-top: 10px;
+
+  display: grid;
+
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  gap: 10px;
+}
+
+.robot-state-panel {
+  padding: 10px;
+
+  border: 1px solid var(--line);
+
+  border-radius: 10px;
+
+  background: #ffffff06;
+}
+
+.robot-state-panel small {
+  display: block;
+
+  margin-bottom: 4px;
+
+  color: var(--muted);
+
+  font-size: 11px;
+
+  letter-spacing: .02em;
+}
+
 .robot-state {
   display: block;
 

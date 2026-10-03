@@ -681,7 +681,27 @@
     return `robot_${Number(robotNumber)}`;
   }
 
-  function robotStatusLabel(status) {
+  function robotAliveLabel(status) {
+    const value =
+      String(status || "disconnected")
+        .toLowerCase();
+
+    return value === "disconnected"
+      ? "DISCONNECT"
+      : "ALIVE";
+  }
+
+  function robotAliveClass(status) {
+    const value =
+      String(status || "disconnected")
+        .toLowerCase();
+
+    return value === "disconnected"
+      ? "bad"
+      : "good";
+  }
+
+  function robotWorkLabel(status) {
     const value =
       String(status || "disconnected")
         .toLowerCase();
@@ -694,14 +714,18 @@
       return "ON TASK";
     }
 
-    if (value === "come_back") {
-      return "COME BACK";
+    if (value === "on_target") {
+      return "ON TARGET";
     }
 
-    return "DISCONNECTED";
+    if (value === "on_home" || value === "come_back") {
+      return "ON HOME";
+    }
+
+    return "-";
   }
 
-  function robotStatusClass(status) {
+  function robotWorkClass(status) {
     const value =
       String(status || "disconnected")
         .toLowerCase();
@@ -710,11 +734,16 @@
       return "good";
     }
 
-    if (value === "on_task" || value === "come_back") {
+    if (
+      value === "on_task" ||
+      value === "on_target" ||
+      value === "on_home" ||
+      value === "come_back"
+    ) {
       return "warn";
     }
 
-    return "bad";
+    return "muted";
   }
 
   function formatHeartbeat(value) {
@@ -753,14 +782,29 @@
         "disconnected"
       ).toLowerCase();
 
-    const statusElement =
+    const titleElement =
       $("robotState");
 
-    statusElement.textContent =
-      `Robot ${state.robot} · ${robotStatusLabel(status)}`;
+    const aliveElement =
+      $("robotAliveState");
 
-    statusElement.className =
-      `robot-state ${robotStatusClass(status)}`;
+    const workElement =
+      $("robotWorkState");
+
+    titleElement.textContent =
+      `Robot ${state.robot}`;
+
+    aliveElement.textContent =
+      robotAliveLabel(status);
+
+    aliveElement.className =
+      `robot-state ${robotAliveClass(status)}`;
+
+    workElement.textContent =
+      robotWorkLabel(status);
+
+    workElement.className =
+      `robot-state ${robotWorkClass(status)}`;
 
     const meta = [];
 
