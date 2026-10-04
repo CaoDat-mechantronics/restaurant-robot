@@ -756,7 +756,7 @@
       await ackPromise;
 
       controlState.currentDispatch = confirmed;
-      controlState.robotStatus = "on_task";
+      controlState.robotStatus = "received_task";
       setDebugAvailability(true);
       controlState.pendingDelivery = null;
       $("pendingDeliveryCard").hidden = true;
@@ -767,7 +767,7 @@
 
       // Protocol điều khiển chính thức mới: không tự chạy motor/navigation cũ.
       // Người dùng chủ động bấm BẮT ĐẦU để mở camera sau và gửi payload 3.
-      setMessage("ESP32 đã lưu task. Nhiệm vụ sẵn sàng; nhấn BẮT ĐẦU để chạy.");
+      setMessage("ESP32 đã nhận task. Trạng thái RECEIVED TASK; nhấn BẮT ĐẦU để thực thi.");
     }
     catch (error) {
       log(`DISPATCH ERROR: ${error.message}`);
@@ -1143,11 +1143,24 @@
     return 180;
   }
 
-  // Một biến duy nhất để chỉnh ngưỡng kích thước QR kích hoạt hành động.
-  // Giá trị là phần trăm diện tích QR so với toàn frame camera.
+  // Ngưỡng QR lấy ưu tiên từ localStorage (robot_setting_official).
+  // Nếu chưa có giá trị đã lưu thì fallback về QR_ACTION_MIN_AREA_PERCENT trong config.
   function getQrActionMinAreaPercent() {
-    const value = Number(navConfig.QR_ACTION_MIN_AREA_PERCENT);
-    return Number.isFinite(value) && value >= 0 ? value : 1.45;
+    const configValue = Number(navConfig.QR_ACTION_MIN_AREA_PERCENT);
+    const fallback = Number.isFinite(configValue) && configValue >= 0
+      ? configValue
+      : 2.1;
+
+    try {
+      const raw = localStorage.getItem("robot_setting_official");
+      const saved = raw ? JSON.parse(raw) : null;
+      const storedValue = Number(saved?.qrActionMinAreaPercent);
+      if (Number.isFinite(storedValue) && storedValue >= 0) {
+        return Math.min(100, storedValue);
+      }
+    } catch (_) {}
+
+    return fallback;
   }
 
   function parseTableNumber(value) {
@@ -1690,6 +1703,26 @@
       // Sau khi camera sau sẵn sàng mới gửi lệnh bám line.
       await publishStatusCommandAsync(DEBUG_COMMAND.LINE_FOLLOW);
       if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) return;
+
+      // Task chỉ chuyển từ RECEIVED TASK -> ON TASK sau khi lệnh thực thi
+      // (BÁM LINE = 3) đã được publish thành công tới ESP32.
+      try {
+        await api(
+          "/robot-ai/work-status",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              robot: controlState.robot,
+              status: "on_task"
+            })
+          }
+        );
+        controlState.robotStatus = "on_task";
+      } catch (statusError) {
+        // Không dừng robot chỉ vì lưu trạng thái backend thất bại.
+        // Robot đã nhận lệnh chạy; log để có thể retry/kiểm tra backend.
+        log(`WORK STATUS UPDATE ERROR: ${statusError.message}`);
+      }
 
       officialRouteSession.phase = "line_follow";
       setOfficialStartButtonState(true, `Đang tìm ${officialRouteSession.targetTableQr}`);
@@ -2331,13 +2364,14 @@
       controlState.navigationTaskKey = buildNavigationTaskKey(task);
     }
 
-    if (status === "on_task") {
-      // Protocol chính thức mới KHÔNG tự khởi động controller PWM cũ.
-      // Chỉ lưu task; robot bắt đầu khi người dùng bấm BẮT ĐẦU.
+    if (status === "received_task" || status === "on_task") {
+      // RECEIVED TASK: robot đã nhận task nhưng chưa chạy.
+      // ON TASK: robot đã bắt đầu thực thi.
+      // Cả hai đều chỉ giữ snapshot; không tự khởi động controller PWM cũ.
       return;
     }
 
-    // Nếu status không phải on_task nhưng backend vẫn còn tasks, giữ snapshot
+    // Nếu status không phải received_task/on_task nhưng backend vẫn còn tasks, giữ snapshot
     // để giao diện và nút BẮT ĐẦU có thể sử dụng. Chỉ xóa khi thực sự không có task.
     if (!isNonEmptyObject(task)) {
       controlState.latestTask = null;

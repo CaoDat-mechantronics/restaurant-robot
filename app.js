@@ -707,6 +707,10 @@
       return "AVAILABLE";
     }
 
+    if (value === "received_task") {
+      return "RECEIVED TASK";
+    }
+
     if (value === "on_task") {
       return "ON TASK";
     }
@@ -732,6 +736,7 @@
     }
 
     if (
+      value === "received_task" ||
       value === "on_task" ||
       value === "on_target" ||
       value === "on_home" ||

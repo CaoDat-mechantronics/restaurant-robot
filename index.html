@@ -702,6 +702,26 @@
         </div>
       </label>
 
+      <label class="settings-field settings-number-field">
+        <span>
+          <b>Area percent</b>
+          <small>Diện tích QR tối thiểu để được xét cho điều hướng.</small>
+        </span>
+        <div class="settings-number-control">
+          <input
+            id="settingsQrAreaPercent"
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            value="2.1"
+            inputmode="decimal"
+            aria-label="Area percent QR tối thiểu"
+          >
+          <span>%</span>
+        </div>
+      </label>
+
       <button
         id="settingsAdvancedButton"
         class="settings-advanced-button"
@@ -919,7 +939,7 @@
 <!-- =====================================================
      JAVASCRIPT
      ===================================================== -->
-<script src="config.js?v=20261003-qr-area-uturn-1"></script>
+<script src="config.js?v=20261004-received-task-qr-area-1"></script>
 
 <!-- MQTT over WebSocket + QR fallback -->
 <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
@@ -931,8 +951,8 @@
 <script src="orientation.js?v=20260930-audioworklet-1"></script>
 <script src="vision.js?v=20261002-qr-red-overlay-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
-<script src="app.js?v=20260930-audioworklet-1"></script>
-<script src="robot-control.js?v=20261003-qr-area-uturn-1"></script>
+<script src="app.js?v=20261004-received-task-qr-area-1"></script>
+<script src="robot-control.js?v=20261004-received-task-qr-area-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
@@ -972,6 +992,10 @@
   const DEFAULT_TURN_ANGLE = 90;
 
   const navigationConfig = window.APP_CONFIG?.NAVIGATION || {};
+  const DEFAULT_QR_ACTION_MIN_AREA_PERCENT = (() => {
+    const value = Number(navigationConfig.QR_ACTION_MIN_AREA_PERCENT);
+    return Number.isFinite(value) && value >= 0 ? value : 2.1;
+  })();
   const MAX_LOGICAL_SPEED = Math.max(1, Number(navigationConfig.MAX_SPEED) || 155);
   const DEFAULT_ROTATE_SPEED = Math.min(
     MAX_LOGICAL_SPEED,
@@ -1000,6 +1024,7 @@
   const settingsRobotSelect = document.getElementById("settingsRobotSelect");
   const settingsUTurnAngle = document.getElementById("settingsUTurnAngle");
   const settingsTurnAngle = document.getElementById("settingsTurnAngle");
+  const settingsQrAreaPercent = document.getElementById("settingsQrAreaPercent");
   const settingsUpdateServerButton = document.getElementById("settingsUpdateServerButton");
   const settingsSaveStorageButton = document.getElementById("settingsSaveStorageButton");
 
@@ -1025,6 +1050,12 @@
     const speed = Number(value);
     if (!Number.isFinite(speed)) return Math.round(fallback);
     return Math.min(max, Math.max(1, Math.round(speed)));
+  };
+
+  const normalizeQrAreaPercent = (value, fallback = DEFAULT_QR_ACTION_MIN_AREA_PERCENT) => {
+    const percent = Number(value);
+    if (!Number.isFinite(percent)) return fallback;
+    return Math.min(100, Math.max(0, Math.round(percent * 100) / 100));
   };
 
   const readDebugState = () => {
@@ -1064,6 +1095,53 @@
       return parsed && typeof parsed === "object" ? parsed : null;
     } catch (_) {
       return null;
+    }
+  };
+
+  const syncQrAreaDefaultToStorage = () => {
+    try {
+      const saved = readStoredSettings() || {};
+      const storedValue = Number(saved.qrActionMinAreaPercent);
+      const storedConfigDefault = Number(saved.qrActionMinAreaPercentConfigDefault);
+      const hasStoredValue = Number.isFinite(storedValue) && storedValue >= 0;
+      const hasStoredConfigDefault = Number.isFinite(storedConfigDefault) && storedConfigDefault >= 0;
+
+      let nextValue = hasStoredValue
+        ? normalizeQrAreaPercent(storedValue)
+        : DEFAULT_QR_ACTION_MIN_AREA_PERCENT;
+
+      // Nếu người dùng chưa từng tùy chỉnh (giá trị hiện tại bằng default config cũ),
+      // khi config source đổi thì tự đồng bộ sang default mới.
+      // Nếu người dùng đã tùy chỉnh khác default cũ thì giữ nguyên giá trị người dùng.
+      if (
+        hasStoredValue &&
+        hasStoredConfigDefault &&
+        Math.abs(storedValue - storedConfigDefault) < 0.000001 &&
+        Math.abs(storedConfigDefault - DEFAULT_QR_ACTION_MIN_AREA_PERCENT) >= 0.000001
+      ) {
+        nextValue = DEFAULT_QR_ACTION_MIN_AREA_PERCENT;
+      }
+
+      const needsWrite =
+        !hasStoredValue ||
+        !hasStoredConfigDefault ||
+        Math.abs(nextValue - storedValue) >= 0.000001 ||
+        Math.abs((hasStoredConfigDefault ? storedConfigDefault : NaN) - DEFAULT_QR_ACTION_MIN_AREA_PERCENT) >= 0.000001;
+
+      if (needsWrite) {
+        localStorage.setItem(
+          SETTINGS_STORAGE_KEY,
+          JSON.stringify({
+            ...saved,
+            qrActionMinAreaPercent: nextValue,
+            qrActionMinAreaPercentConfigDefault: DEFAULT_QR_ACTION_MIN_AREA_PERCENT
+          })
+        );
+      }
+
+      return nextValue;
+    } catch (_) {
+      return DEFAULT_QR_ACTION_MIN_AREA_PERCENT;
     }
   };
 
@@ -1156,7 +1234,20 @@
       cornerEntrySpeed: saved?.cornerEntrySpeed ?? DEFAULT_CORNER_ENTRY_SPEED
     });
 
-    if (!saved) return speedSettings;
+    const qrActionMinAreaPercent = normalizeQrAreaPercent(
+      saved?.qrActionMinAreaPercent,
+      DEFAULT_QR_ACTION_MIN_AREA_PERCENT
+    );
+    navigationConfig.QR_ACTION_MIN_AREA_PERCENT = qrActionMinAreaPercent;
+    window.ROBOT_RUNTIME_SETTINGS = {
+      ...(window.ROBOT_RUNTIME_SETTINGS || {}),
+      qrActionMinAreaPercent
+    };
+    if (settingsQrAreaPercent) {
+      settingsQrAreaPercent.value = String(qrActionMinAreaPercent);
+    }
+
+    if (!saved) return { ...speedSettings, qrActionMinAreaPercent };
 
     if (settingsUTurnAngle) {
       settingsUTurnAngle.value = String(
@@ -1186,7 +1277,7 @@
       }
     }
 
-    return speedSettings;
+    return { ...speedSettings, qrActionMinAreaPercent };
   };
 
   const collectSettings = () => {
@@ -1212,6 +1303,11 @@
       debugEnabled: Boolean(settingsDebugToggle?.checked ?? debugModeToggle?.checked),
       uTurnAngle: normalizeAngle(settingsUTurnAngle?.value, DEFAULT_U_TURN_ANGLE),
       turnAngle: normalizeAngle(settingsTurnAngle?.value, DEFAULT_TURN_ANGLE),
+      qrActionMinAreaPercent: normalizeQrAreaPercent(
+        settingsQrAreaPercent?.value,
+        DEFAULT_QR_ACTION_MIN_AREA_PERCENT
+      ),
+      qrActionMinAreaPercentConfigDefault: DEFAULT_QR_ACTION_MIN_AREA_PERCENT,
       rotateSpeed,
       advancedTurnSpeed: turnSpeed,
       lineFollowSpeed,
@@ -1224,6 +1320,13 @@
 
     if (settingsUTurnAngle) settingsUTurnAngle.value = String(data.uTurnAngle);
     if (settingsTurnAngle) settingsTurnAngle.value = String(data.turnAngle);
+    if (settingsQrAreaPercent) settingsQrAreaPercent.value = String(data.qrActionMinAreaPercent);
+
+    navigationConfig.QR_ACTION_MIN_AREA_PERCENT = data.qrActionMinAreaPercent;
+    window.ROBOT_RUNTIME_SETTINGS = {
+      ...(window.ROBOT_RUNTIME_SETTINGS || {}),
+      qrActionMinAreaPercent: data.qrActionMinAreaPercent
+    };
 
     applyRuntimeSpeedSettings({
       rotateSpeed: data.rotateSpeed,
@@ -1279,6 +1382,7 @@
   };
 
   applyDebugState(readDebugState(), false);
+  syncQrAreaDefaultToStorage();
   applyStoredSettings();
 
   debugModeToggle?.addEventListener("change", () => {

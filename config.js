@@ -435,7 +435,7 @@ window.APP_CONFIG = {
     // Chỉ QR có diện tích >= giá trị này (% diện tích frame camera)
     // mới được phép kích hoạt hành động tại nga_re hoặc ban_<số bàn>.
     // Có thể chỉnh duy nhất biến này khi cần tăng/giảm độ gần của QR.
-    QR_ACTION_MIN_AREA_PERCENT: 1.45,
+    QR_ACTION_MIN_AREA_PERCENT: 2.1,
 
     // ---------------------------------------------------
     // QR BÀN ĐÍCH
