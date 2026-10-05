@@ -557,14 +557,6 @@
     },
 
     onStatus: (payload) => {
-      if (payload?.type === "command_ack") {
-        log(
-          `ESP32 ACK command=${payload.command_id} ` +
-          `table=${payload.table} line=${payload.line} stop=${payload.stop_index}`
-        );
-        return;
-      }
-
       if (payload?.type === "motor_state") {
         const left = Number(payload.left ?? 0);
         const right = Number(payload.right ?? 0);
@@ -704,22 +696,15 @@
       return;
     }
 
-    if (!mqttBridge.connected) {
-      setMessage("Cảm biến món báo CÓ MÓN nhưng MQTT WebSocket chưa connected.", true);
-      return;
-    }
-
     if (!controlState.sensors.has_food) {
       return;
     }
 
     controlState.dispatching = true;
-    setMessage("Đã có món. Đang cập nhật database và gửi task trực tiếp tới ESP32...");
-
-    let confirmed = null;
+    setMessage("Đã có món. Đang xác nhận và lưu nhiệm vụ vào database...");
 
     try {
-      confirmed = await api(
+      const confirmed = await api(
         "/robot-ai/confirm-dispatch",
         {
           method: "POST",
@@ -740,21 +725,9 @@
         food_name: confirmed.food_name
       };
 
-      // ESP32 chỉ cần lưu table, line, stop_index.
-      const ackPromise = mqttBridge.waitForTaskAck(
-        confirmed.command_id,
-        4500
-      );
-
-      mqttBridge.publishTask({
-        command_id: confirmed.command_id,
-        table: confirmed.table,
-        line: confirmed.route.line,
-        stop_index: confirmed.route.stop_index
-      });
-
-      await ackPromise;
-
+      // Không còn truyền nội dung task xuống ESP32 và không chờ command ACK.
+      // Backend + frontend giữ nhiệm vụ/route; ESP32 chỉ là tầng chấp hành
+      // và nhận lệnh tức thời qua topic/status.
       controlState.currentDispatch = confirmed;
       controlState.robotStatus = "received_task";
       setDebugAvailability(true);
@@ -765,34 +738,13 @@
       controlState.navigationTaskKey = buildNavigationTaskKey(task);
       controlState.blockedResumeTaskKey = null;
 
-      // Protocol điều khiển chính thức mới: không tự chạy motor/navigation cũ.
-      // Người dùng chủ động bấm BẮT ĐẦU để mở camera sau và gửi payload 3.
-      setMessage("ESP32 đã nhận task. Trạng thái RECEIVED TASK; nhấn BẮT ĐẦU để thực thi.");
+      setMessage(
+        "Nhiệm vụ đã được lưu. Trạng thái RECEIVED TASK; nhấn BẮT ĐẦU để thực thi."
+      );
     }
     catch (error) {
       log(`DISPATCH ERROR: ${error.message}`);
       setMessage(`Dispatch lỗi: ${error.message}`, true);
-      mqttBridge.stopMotor();
-
-      if (confirmed?.command_id) {
-        try {
-          await api(
-            "/robot-ai/cancel-dispatch",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                item_id: pending.item_id,
-                robot: pending.robot,
-                command_id: confirmed.command_id
-              })
-            }
-          );
-          log("Dispatch database đã rollback.");
-        }
-        catch (rollbackError) {
-          log(`ROLLBACK ERROR: ${rollbackError.message}`);
-        }
-      }
     }
     finally {
       controlState.dispatching = false;

@@ -25,7 +25,6 @@
       this.client = null;
       this.robot = 1;
       this.connected = false;
-      this.ackWaiters = new Map();
       this.motorSeq = 0;
     }
 
@@ -231,21 +230,6 @@
         }
 
         this.onStatus(payload, topic);
-
-        if (
-          payload &&
-          payload.type === "command_ack" &&
-          payload.command_id
-        ) {
-          const key = String(payload.command_id);
-          const waiter = this.ackWaiters.get(key);
-
-          if (waiter) {
-            clearTimeout(waiter.timer);
-            this.ackWaiters.delete(key);
-            waiter.resolve(payload);
-          }
-        }
       }
     }
 
@@ -268,56 +252,6 @@
       return true;
     }
 
-
-    publishTask(task) {
-      if (!this.client || !this.connected) {
-        throw new Error("MQTT WebSocket chưa kết nối.");
-      }
-
-      const payload = {
-        type: "delivery_task",
-        command_id: String(task.command_id || ""),
-        table: Number(task.table),
-        line: Number(task.line),
-        stop_index: Number(task.stop_index)
-      };
-
-      this.client.publish(
-        this.topic(this.robot, "task"),
-        JSON.stringify(payload),
-        { qos: 1, retain: false }
-      );
-
-      this.onDebug(
-        `MQTT PUB ${this.topic(this.robot, "task")} ${JSON.stringify(payload)}`
-      );
-    }
-
-    waitForTaskAck(commandId, timeoutMs = 4000) {
-      const key = String(commandId || "");
-      if (!key) {
-        return Promise.reject(new Error("Thiếu command_id."));
-      }
-
-      return new Promise((resolve, reject) => {
-        const old = this.ackWaiters.get(key);
-        if (old) {
-          clearTimeout(old.timer);
-          this.ackWaiters.delete(key);
-        }
-
-        const timer = window.setTimeout(() => {
-          this.ackWaiters.delete(key);
-          reject(new Error("ESP32 không ACK task trong thời gian cho phép."));
-        }, timeoutMs);
-
-        this.ackWaiters.set(key, {
-          resolve,
-          reject,
-          timer
-        });
-      });
-    }
 
     publishMotor(left, right) {
       if (!this.client || !this.connected) {
@@ -349,12 +283,6 @@
     }
 
     close() {
-      for (const waiter of this.ackWaiters.values()) {
-        clearTimeout(waiter.timer);
-        waiter.reject(new Error("MQTT bridge đã đóng."));
-      }
-      this.ackWaiters.clear();
-
       if (this.client) {
         try {
           this.client.end(true);

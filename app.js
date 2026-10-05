@@ -723,6 +723,10 @@
       return "ON HOME";
     }
 
+    if (value === "abnormal_behavior") {
+      return "ABNORMAL BEHAVIOR";
+    }
+
     return "-";
   }
 
@@ -743,6 +747,10 @@
       value === "come_back"
     ) {
       return "warn";
+    }
+
+    if (value === "abnormal_behavior") {
+      return "bad";
     }
 
     return "muted";
