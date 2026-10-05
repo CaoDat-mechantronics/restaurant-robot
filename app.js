@@ -823,6 +823,18 @@
       if (!live.mic) {
         await live.startMic();
       }
+
+      // Chỉ khi phiên được mở bằng wake phrase "nhân viên phục vụ",
+      // chủ động tạo một turn ẩn để Gemini chào ngay sau khi kết nối.
+      // Nút Nhận lệnh không tự phát câu chào này.
+      if (source === "wake") {
+        await live.sendText(
+          'Bạn vừa được gọi bằng câu "nhân viên phục vụ". Hãy chỉ đáp đúng một câu: "Dạ có em ạ." Sau đó tiếp tục lắng nghe người dùng.',
+          {
+            showTranscript: false
+          }
+        );
+      }
     } catch (error) {
       resumeWakeRecognition();
       throw error;

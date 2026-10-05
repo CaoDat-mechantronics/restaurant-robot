@@ -34,9 +34,11 @@ class GeminiRobotLive {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 4;
 
-    // Khi Gemini gọi tool stop_listening, tool response được gửi về model trước,
-    // sau đó phiên Live mới đóng để tránh cắt ngang function response.
+    // Khi Gemini gọi stop_listening, không đóng phiên ngay. Mic sẽ ngừng thu,
+    // Gemini nói câu chào kết thúc, sau đó frontend mới đóng Live session.
     this.stopListeningAfterToolResponse = false;
+    this.closeAfterFarewellTurn = false;
+    this.farewellCloseTimer = null;
 
     // Kết quả check-food gần nhất. prepare_delivery chỉ được tạo từ dữ liệu này.
     this.lastFoodCheck = null;
@@ -96,6 +98,11 @@ QUY TẮC BẮT BUỘC:
     "xong rồi", "dừng nghe", hãy gọi function stop_listening.
     Không gọi stop_listening khi người dùng chỉ nói "đồng ý", "ok" hoặc "xác nhận"
     trong lúc xác nhận nhiệm vụ giao món.
+
+12. Khi stop_listening trả về success=true, PHẢI nói một câu chào kết thúc lịch sự trước
+    khi phiên đóng. Ưu tiên nói đúng câu:
+    "Nếu không có việc gì nữa thì em xin phép ạ, cần gì thì cứ gọi em ạ."
+    Không hỏi thêm câu hỏi nào sau lời chào này.
 `;
   }
 
@@ -148,7 +155,7 @@ QUY TẮC BẮT BUỘC:
           {
             name: "stop_listening",
             description:
-              "Dừng nghe và đóng phiên Gemini Live khi người dùng nói rằng đã xong, không cần hỗ trợ thêm, hoặc yêu cầu dừng nghe. Không dùng tool này cho lời xác nhận nhiệm vụ như 'đồng ý', 'ok', 'xác nhận'.",
+              "Dừng nghe khi người dùng nói rằng đã xong, không cần hỗ trợ thêm, hoặc yêu cầu dừng nghe. Sau khi tool thành công, phải nói lời chào kết thúc lịch sự rồi frontend mới đóng phiên. Không dùng tool này cho lời xác nhận nhiệm vụ như 'đồng ý', 'ok', 'xác nhận'.",
             parameters: {
               type: "OBJECT",
               properties: {}
@@ -576,6 +583,24 @@ QUY TẮC BẮT BUỘC:
           ? "listening"
           : "ready"
       );
+
+      // Sau stop_listening, turn này là lời chào kết thúc của Gemini.
+      // Chờ thêm một khoảng để PCM đã queue phát hết rồi mới đóng socket,
+      // tránh cắt ngang câu nói ở cuối.
+      if (this.closeAfterFarewellTurn) {
+        this.closeAfterFarewellTurn = false;
+
+        if (this.farewellCloseTimer) {
+          clearTimeout(this.farewellCloseTimer);
+        }
+
+        this.farewellCloseTimer = window.setTimeout(() => {
+          this.farewellCloseTimer = null;
+          this.close();
+          this.onState("closed");
+          this.onStopListening();
+        }, 5000);
+      }
     }
 
     if (message.toolCall) {
@@ -674,16 +699,25 @@ QUY TẮC BẮT BUỘC:
       }
     });
 
-    // Đóng phiên SAU KHI đã gửi function response để Gemini không bị cắt
-    // ngang khi vừa gọi stop_listening.
+    // Với stop_listening, giữ socket mở để Gemini còn nói lời chào kết thúc.
+    // Mic đã được dừng trong execTool(), nên robot không tiếp tục thu lời người dùng.
     if (this.stopListeningAfterToolResponse) {
       this.stopListeningAfterToolResponse = false;
+      this.closeAfterFarewellTurn = true;
 
-      window.setTimeout(() => {
+      // Fallback: nếu vì lỗi mạng/model mà không bao giờ nhận turnComplete,
+      // vẫn đóng phiên sau một khoảng đủ dài để tránh treo chế độ Gemini.
+      if (this.farewellCloseTimer) {
+        clearTimeout(this.farewellCloseTimer);
+      }
+
+      this.farewellCloseTimer = window.setTimeout(() => {
+        this.farewellCloseTimer = null;
+        this.closeAfterFarewellTurn = false;
         this.close();
         this.onState("closed");
         this.onStopListening();
-      }, 120);
+      }, 12000);
     }
   }
 
@@ -754,12 +788,24 @@ QUY TẮC BẮT BUỘC:
       name ===
       "stop_listening"
     ) {
+      // Ngừng thu âm ngay để không tiếp tục xử lý lời nói mới, nhưng vẫn giữ
+      // WebSocket/output audio mở để Gemini nói lời chào kết thúc.
+      if (this.mic) {
+        this.stopMic();
+      } else {
+        this.wantMic = false;
+      }
+
       this.stopListeningAfterToolResponse = true;
 
       return {
         success: true,
         stopped: true,
-        message: "Đã dừng lắng nghe và đóng phiên Gemini Live."
+        farewell_required: true,
+        farewell_text:
+          "Nếu không có việc gì nữa thì em xin phép ạ, cần gì thì cứ gọi em ạ.",
+        message:
+          "Đã ngừng thu microphone. Hãy nói farewell_text rồi kết thúc lượt trả lời."
       };
     }
 
@@ -999,7 +1045,10 @@ QUY TẮC BẮT BUỘC:
   // SEND DEBUG TEXT
   // =========================================================
 
-  async sendText(text) {
+  async sendText(
+    text,
+    options = {}
+  ) {
     const value =
       String(text || "")
         .trim();
@@ -1016,10 +1065,12 @@ QUY TẮC BẮT BUỘC:
       );
     }
 
-    this.onTranscript(
-      "user",
-      value
-    );
+    if (options.showTranscript !== false) {
+      this.onTranscript(
+        "user",
+        value
+      );
+    }
 
     this.send({
       clientContent: {
@@ -1085,6 +1136,12 @@ QUY TẮC BẮT BUỘC:
   close() {
     this.intentionalClose = true;
     this.wantMic = false;
+    this.closeAfterFarewellTurn = false;
+
+    if (this.farewellCloseTimer) {
+      clearTimeout(this.farewellCloseTimer);
+      this.farewellCloseTimer = null;
+    }
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
