@@ -8,6 +8,15 @@ window.APP_CONFIG = {
   GEMINI_WS_BASE: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained",
 
   // =====================================================
+  // GEMINI LIVE VOICE
+  // =====================================================
+  // Cố định voice cho toàn bộ phiên Gemini Live.
+  // Aoede là một prebuilt voice nữ; accent Bắc/Nam không phải là
+  // một tham số riêng của Live API, nên giọng Hà Nội được ràng buộc
+  // thêm bằng system instruction trong gemini-live.js.
+  GEMINI_VOICE_NAME: "Achernar", // "Leda" | "Achernar" | "Aoede" | "Syrma" | "Antares" | "Bellatrix"
+
+  // =====================================================
   // HIVEMQ CLOUD - FRONTEND MQTT OVER WEBSOCKET
   // =====================================================
   // Nên tạo 1 MQTT user riêng cho frontend, chỉ cấp quyền:

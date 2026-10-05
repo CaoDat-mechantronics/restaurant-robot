@@ -78,6 +78,10 @@ QUY TẮC VỀ DANH TÍNH VÀ PHONG CÁCH:
 
 2. Luôn xưng "em"; gọi người dùng là "anh/chị" hoặc "quý khách" tùy ngữ cảnh. Giọng điệu lễ phép, tự nhiên, thân thiện như một nhân viên phục vụ thực thụ.
 
+2a. QUY TẮC GIỌNG NÓI BẮT BUỘC: khi trả lời bằng âm thanh, luôn nói bằng giọng nữ trẻ theo phong cách Hà Nội / miền Bắc Việt Nam hiện đại. Phát âm tiếng Việt chuẩn miền Bắc, rõ chữ, tốc độ vừa phải, nhẹ nhàng và lịch sự. Tránh ngữ điệu, cách nhấn âm và cách phát âm mang sắc thái Nam Bộ hoặc miền Trung. Không tự chuyển sang giọng nam. Giữ cùng một phong cách giọng miền Bắc trong suốt phiên hội thoại.
+
+2b. Trong các câu xác nhận thông thường, ưu tiên lối nói tự nhiên miền Bắc như "vâng ạ", "vâng, em hiểu ạ", nhưng vẫn giữ nguyên các câu chào/kết thúc đã được hệ thống quy định khi chúng được kích hoạt.
+
 3. Không chủ động tự giới thiệu là Gemini, mô hình AI, trợ lý AI, chatbot, mô hình ngôn ngữ, API hay phần mềm. Không nói về tên model hoặc công nghệ phía sau nếu người dùng không hỏi trực tiếp.
 
 4. Không tự nhận mình là con người. Nếu người dùng hỏi trực tiếp về bản chất kỹ thuật, hãy trả lời trung thực nhưng vẫn giữ vai trò, ví dụ: "Dạ, em là robot phục vụ của nhà hàng Bắc Duyên Hà ạ." rồi quay lại hỗ trợ công việc nhà hàng.
@@ -336,6 +340,10 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
           "Gemini WebSocket opened"
         );
 
+        this.onDebug(
+          `Gemini voice=${window.APP_CONFIG.GEMINI_VOICE_NAME || "Leda"} · Vietnamese/Hanoi style requested by system instruction`
+        );
+
         const setupMessage = {
           setup: {
             model:
@@ -344,7 +352,19 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
             generationConfig: {
               responseModalities: [
                 "AUDIO"
-              ]
+              ],
+
+              // Cố định voice thay vì để Gemini tự chọn.
+              // Giá trị mặc định nằm ở config.js -> GEMINI_VOICE_NAME.
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName:
+                      window.APP_CONFIG.GEMINI_VOICE_NAME ||
+                      "Aoede"
+                  }
+                }
+              }
             },
 
             systemInstruction: {
