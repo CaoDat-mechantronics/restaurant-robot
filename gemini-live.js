@@ -7,7 +7,8 @@ class GeminiRobotLive {
     onTranscript = () => {},
     onToolResult = () => {},
     onDebug = () => {},
-    onLevel = () => {}
+    onLevel = () => {},
+    onStopListening = () => {}
   }) {
     this.apiBase = apiBase.replace(/\/+$/, "");
 
@@ -18,6 +19,7 @@ class GeminiRobotLive {
     this.onTranscript = onTranscript;
     this.onToolResult = onToolResult;
     this.onDebug = onDebug;
+    this.onStopListening = onStopListening;
 
     this.socket = null;
     this.ready = false;
@@ -31,6 +33,10 @@ class GeminiRobotLive {
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 4;
+
+    // Khi Gemini gọi tool stop_listening, tool response được gửi về model trước,
+    // sau đó phiên Live mới đóng để tránh cắt ngang function response.
+    this.stopListeningAfterToolResponse = false;
 
     // Kết quả check-food gần nhất. prepare_delivery chỉ được tạo từ dữ liệu này.
     this.lastFoodCheck = null;
@@ -84,6 +90,12 @@ QUY TẮC BẮT BUỘC:
 9. Nếu người dùng đổi món hoặc đổi bàn trước khi xác nhận, phải gọi check_table_food lại.
 
 10. Route do backend quyết định. Không tự tính hoặc sửa route.
+
+11. Khi người dùng thể hiện rõ là không cần hỗ trợ thêm hoặc muốn kết thúc phiên,
+    ví dụ: "được rồi", "thôi được rồi", "không cần nữa", "cảm ơn, thế thôi",
+    "xong rồi", "dừng nghe", hãy gọi function stop_listening.
+    Không gọi stop_listening khi người dùng chỉ nói "đồng ý", "ok" hoặc "xác nhận"
+    trong lúc xác nhận nhiệm vụ giao món.
 `;
   }
 
@@ -131,6 +143,15 @@ QUY TẮC BẮT BUỘC:
                 }
               },
               required: ["item_id", "table_number"]
+            }
+          },
+          {
+            name: "stop_listening",
+            description:
+              "Dừng nghe và đóng phiên Gemini Live khi người dùng nói rằng đã xong, không cần hỗ trợ thêm, hoặc yêu cầu dừng nghe. Không dùng tool này cho lời xác nhận nhiệm vụ như 'đồng ý', 'ok', 'xác nhận'.",
+            parameters: {
+              type: "OBJECT",
+              properties: {}
             }
           }
         ]
@@ -652,6 +673,18 @@ QUY TẮC BẮT BUỘC:
           responses
       }
     });
+
+    // Đóng phiên SAU KHI đã gửi function response để Gemini không bị cắt
+    // ngang khi vừa gọi stop_listening.
+    if (this.stopListeningAfterToolResponse) {
+      this.stopListeningAfterToolResponse = false;
+
+      window.setTimeout(() => {
+        this.close();
+        this.onState("closed");
+        this.onStopListening();
+      }, 120);
+    }
   }
 
   // =========================================================
@@ -714,6 +747,19 @@ QUY TẮC BẮT BUỘC:
         food_name: checked.item.food_name,
         route: checked.route,
         message: "Đã nhận nhiệm vụ. Đang chờ cảm biến món của ESP32 xác nhận món đã được đặt lên robot."
+      };
+    }
+
+    if (
+      name ===
+      "stop_listening"
+    ) {
+      this.stopListeningAfterToolResponse = true;
+
+      return {
+        success: true,
+        stopped: true,
+        message: "Đã dừng lắng nghe và đóng phiên Gemini Live."
       };
     }
 

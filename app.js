@@ -32,6 +32,13 @@
 
     statusRefreshTimer: null,
 
+    // Wake phrase chạy độc lập với Gemini Live. Khi Gemini đang nghe,
+    // SpeechRecognition này sẽ được pause để tránh tranh microphone.
+    wakeRecognition: null,
+    wakeShouldListen: false,
+    wakeActive: false,
+    wakeRestartTimer: null,
+
     logs: []
   };
 
@@ -207,6 +214,8 @@
       state.live = null;
     }
 
+    pauseWakeRecognition();
+
     clearToken();
 
     showLogin(
@@ -280,8 +289,8 @@
       ],
 
       closed: [
-        "CHƯA KẾT NỐI",
-        "Nhấn Nhận lệnh để bắt đầu."
+        "CHỜ LỆNH",
+        "Nói “nhân viên phục vụ” hoặc nhấn Nhận lệnh."
       ]
     };
 
@@ -601,6 +610,226 @@
   }
 
   // =====================================================
+  // LOCAL WAKE PHRASE: "NHÂN VIÊN PHỤC VỤ"
+  // =====================================================
+  // Chỉ dùng để mở Gemini Live. Khi Gemini đang nghe, wake recognizer được
+  // dừng để không tranh microphone. Nếu trình duyệt không hỗ trợ Web Speech
+  // API thì nút "Nhận lệnh" vẫn hoạt động bình thường.
+
+  function normalizeWakeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isWakePhrase(text) {
+    return normalizeWakeText(text)
+      .includes("nhan vien phuc vu");
+  }
+
+  function getSpeechRecognitionClass() {
+    return (
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition ||
+      null
+    );
+  }
+
+  function clearWakeRestartTimer() {
+    if (!state.wakeRestartTimer) {
+      return;
+    }
+
+    clearTimeout(state.wakeRestartTimer);
+    state.wakeRestartTimer = null;
+  }
+
+  function scheduleWakeRestart(delay = 500) {
+    clearWakeRestartTimer();
+
+    if (!state.wakeShouldListen) {
+      return;
+    }
+
+    state.wakeRestartTimer = window.setTimeout(() => {
+      state.wakeRestartTimer = null;
+      startWakeRecognition();
+    }, delay);
+  }
+
+  function ensureWakeRecognition() {
+    if (state.wakeRecognition) {
+      return state.wakeRecognition;
+    }
+
+    const SpeechRecognition =
+      getSpeechRecognitionClass();
+
+    if (!SpeechRecognition) {
+      return null;
+    }
+
+    const recognition =
+      new SpeechRecognition();
+
+    recognition.lang = "vi-VN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      state.wakeActive = true;
+      log('WAKE: đang chờ câu "nhân viên phục vụ"');
+    };
+
+    recognition.onresult = (event) => {
+      for (
+        let i = event.resultIndex;
+        i < event.results.length;
+        i++
+      ) {
+        const transcript =
+          event.results[i]?.[0]?.transcript || "";
+
+        if (!isWakePhrase(transcript)) {
+          continue;
+        }
+
+        log(`WAKE detected: ${transcript}`);
+
+        // Dừng wake recognizer trước khi Gemini xin microphone.
+        pauseWakeRecognition();
+
+        activateGeminiListening("wake")
+          .catch((error) => {
+            setMode("error");
+            $("assistantText").textContent = error.message;
+            log("WAKE START ERROR: " + error.message);
+            resumeWakeRecognition();
+          });
+
+        break;
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const error = String(event.error || "unknown");
+
+      state.wakeActive = false;
+
+      // Permission bị từ chối thì không restart liên tục.
+      if (
+        error === "not-allowed" ||
+        error === "service-not-allowed"
+      ) {
+        state.wakeShouldListen = false;
+        log("WAKE disabled: microphone/speech permission denied");
+        return;
+      }
+
+      if (error !== "aborted" && error !== "no-speech") {
+        log("WAKE ERROR: " + error);
+      }
+    };
+
+    recognition.onend = () => {
+      state.wakeActive = false;
+
+      if (state.wakeShouldListen) {
+        scheduleWakeRestart();
+      }
+    };
+
+    state.wakeRecognition = recognition;
+    return recognition;
+  }
+
+  function startWakeRecognition() {
+    if (
+      !state.wakeShouldListen ||
+      !getToken() ||
+      state.live?.mic ||
+      state.live?.wantMic ||
+      state.wakeActive
+    ) {
+      return;
+    }
+
+    const recognition =
+      ensureWakeRecognition();
+
+    if (!recognition) {
+      // Không coi là lỗi chức năng: người dùng vẫn có nút Nhận lệnh.
+      return;
+    }
+
+    try {
+      recognition.start();
+    } catch (error) {
+      // InvalidStateError thường chỉ có nghĩa recognition đang start/end.
+      if (error?.name !== "InvalidStateError") {
+        log("WAKE START ERROR: " + error.message);
+      }
+    }
+  }
+
+  function pauseWakeRecognition() {
+    state.wakeShouldListen = false;
+    clearWakeRestartTimer();
+
+    const recognition =
+      state.wakeRecognition;
+
+    if (!recognition) {
+      return;
+    }
+
+    try {
+      recognition.abort();
+    } catch (_) {}
+
+    state.wakeActive = false;
+  }
+
+  function resumeWakeRecognition() {
+    if (!getToken()) {
+      return;
+    }
+
+    state.wakeShouldListen = true;
+    scheduleWakeRestart(250);
+  }
+
+  async function activateGeminiListening(source = "button") {
+    if (!getToken()) {
+      if (source === "button") {
+        showLogin(
+          "Hãy đăng nhập trước khi sử dụng Gemini."
+        );
+      }
+      return;
+    }
+
+    pauseWakeRecognition();
+
+    try {
+      const live = getLive();
+
+      if (!live.mic) {
+        await live.startMic();
+      }
+    } catch (error) {
+      resumeWakeRecognition();
+      throw error;
+    }
+  }
+
+  // =====================================================
   // LIVE INSTANCE
   // =====================================================
 
@@ -633,7 +862,13 @@
           log,
 
         onLevel:
-          () => {}
+          () => {},
+
+        onStopListening:
+          () => {
+            log("GEMINI stop_listening -> wake mode");
+            resumeWakeRecognition();
+          }
       });
 
     return state.live;
@@ -1151,6 +1386,8 @@
     );
 
     await refreshStatus();
+
+    resumeWakeRecognition();
   }
 
   // =====================================================
@@ -1180,6 +1417,8 @@
         // browser vẫn xóa local token.
       }
     }
+
+    pauseWakeRecognition();
 
     if (state.live) {
       state.live.close();
@@ -1326,9 +1565,12 @@
             getLive();
 
           if (live.mic) {
-            live.stopMic();
+            // Nhấn lần nữa = kết thúc hẳn phiên và quay về chờ wake phrase.
+            live.close();
+            setMode("closed");
+            resumeWakeRecognition();
           } else {
-            await live.startMic();
+            await activateGeminiListening("button");
           }
 
         } catch (error) {
@@ -1596,6 +1838,8 @@
       hideLogin();
 
       await refreshStatus();
+
+      resumeWakeRecognition();
 
     } catch (error) {
       /*
