@@ -861,6 +861,34 @@
         getRobotNumber:
           () => state.robot,
 
+        getRobotContext:
+          () => {
+            const key = robotKey();
+            const robot = state.robots[key] || {};
+            const foodLabel =
+              $("robotFoodState")?.textContent?.trim() || "";
+
+            let hasFoodFrontend = null;
+
+            if (foodLabel === "CÓ MÓN") {
+              hasFoodFrontend = true;
+            } else if (foodLabel === "KHÔNG CÓ MÓN") {
+              hasFoodFrontend = false;
+            }
+
+            return {
+              robot_number: Number(state.robot),
+              robot_key: key,
+              alive: selectedRobotAliveState(),
+              alive_meta: state.robotAliveMeta[key] || {},
+              status: String(robot.status || "available").toLowerCase(),
+              robot,
+              all_robots: state.robots,
+              has_food_frontend: hasFoodFrontend,
+              food_state_label: foodLabel
+            };
+          },
+
         onState:
           setMode,
 

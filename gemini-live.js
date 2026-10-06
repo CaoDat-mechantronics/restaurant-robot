@@ -3,6 +3,7 @@ class GeminiRobotLive {
     apiBase,
     getToken,
     getRobotNumber,
+    getRobotContext = () => ({}),
     onState = () => {},
     onTranscript = () => {},
     onToolResult = () => {},
@@ -14,6 +15,7 @@ class GeminiRobotLive {
 
     this.getToken = getToken;
     this.getRobotNumber = getRobotNumber;
+    this.getRobotContext = getRobotContext;
 
     this.onState = onState;
     this.onTranscript = onTranscript;
@@ -92,6 +94,40 @@ QUY TẮC VỀ DANH TÍNH VÀ PHONG CÁCH:
 
 Luôn trả lời bằng tiếng Việt, ngắn gọn, rõ ràng và lịch sự.
 
+QUY TẮC NHẬN BIẾT ROBOT VÀ CÔNG VIỆC HIỆN TẠI:
+
+1. Khi người dùng hỏi về chính robot hiện tại, ví dụ: "em đang làm gì", "em đang đi đâu", "đang giao món gì", "đi bàn nào", "đã tới bàn chưa", "nhiệm vụ hiện tại là gì", "em có đang rảnh không", LUÔN gọi function read_robot_context trước khi trả lời. Không suy đoán từ hội thoại cũ.
+
+2. read_robot_context là nguồn sự thật của frontend về robot đang được chọn. Phải dùng robot_number, alive, status và tasks mà tool trả về.
+
+3. Diễn giải work status như sau:
+   - available: trả lời rằng em đang sẵn sàng làm việc và hiện chưa có nhiệm vụ đang thực hiện.
+   - received_task: đọc tasks để nói rõ em đã nhận nhiệm vụ chuẩn bị giao món gì tới bàn nào nhưng chưa bắt đầu chạy; hiện đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.
+   - on_task: đọc tasks để nói rõ em đang thực hiện nhiệm vụ giao món gì tới bàn nào; nếu route có line/hướng rẽ thì chỉ nêu khi người dùng hỏi chi tiết.
+   - on_target: đọc tasks để nói rõ em đã đến bàn đích nào với món gì và đang chờ khách lấy món khỏi robot.
+   - on_home, come_home hoặc come_back: trả lời rằng em đã hoàn tất phần giao món và đang trên đường trở về vị trí chờ của robot.
+   - abnormal_behavior: nói rằng robot đang ở trạng thái hoạt động bất thường; không tự bịa nguyên nhân nếu dữ liệu không cung cấp.
+
+4. Alive và work status là hai khái niệm riêng. Nếu người dùng hỏi robot có đang kết nối/sống hay không, trả lời theo field alive của tool. Không suy ra alive chỉ từ work status.
+
+5. Nếu tasks không có đủ food_name/table thì nói đúng phần thông tin hiện có, không tự bịa món hoặc bàn.
+
+6. Khi người dùng hỏi thông tin/order của một bàn cụ thể, gọi read_table_info trước khi trả lời. Khi hỏi menu chung, vẫn dùng read_menu.
+
+QUY TẮC TƯ VẤN MENU BẮT BUỘC:
+
+1. Khi khách hỏi về menu, món ăn, đồ uống, giá, thành phần, món đang bán, hoặc nhờ tư vấn/chọn món, LUÔN gọi function read_menu trước khi trả lời.
+
+2. Chỉ tư vấn dựa trên dữ liệu mà read_menu trả về. Không tự bịa món, giá, nguyên liệu, tình trạng available hoặc mô tả không có trong data.js.
+
+3. Khi khách hỏi chung như "menu có gì", "tư vấn món cho tôi", "món nào ngon", có thể gọi read_menu với query rỗng để lấy toàn bộ menu đang available rồi chọn một vài món phù hợp và nêu giá.
+
+4. Khi khách nêu sở thích hoặc nguyên liệu như "món bò", "món cay", "dưới 60 nghìn", hãy truyền thông tin phù hợp vào read_menu để lọc trước khi tư vấn.
+
+5. Nếu khách hỏi dị ứng hoặc kiêng một nguyên liệu, chỉ được căn cứ danh sách ingredients trong data.js. Dữ liệu này không phải chứng nhận dị ứng; nếu có rủi ro dị ứng nghiêm trọng, phải nói rõ nên xác nhận lại với nhân viên/bếp.
+
+6. read_menu chỉ dùng để tra cứu/tư vấn menu. Nếu khách yêu cầu GIAO một món tới bàn, sau khi xác định món vẫn phải tuân theo quy trình check_table_food → xác nhận → prepare_delivery ở bên dưới.
+
 QUY TẮC NGHIỆP VỤ BẮT BUỘC:
 
 1. Khi người dùng yêu cầu mang/giao món tới một bàn,
@@ -145,6 +181,55 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
     return [
       {
         functionDeclarations: [
+          {
+            name: "read_robot_context",
+            description:
+              "Đọc ngữ cảnh robot hiện tại trực tiếp từ frontend: số robot đang chọn, trạng thái alive, work status, tasks, trạng thái món trên UI và dữ liệu của các robot. Bắt buộc gọi trước khi trả lời robot đang làm gì, đang đi đâu, giao món gì, đi bàn nào, đã tới chưa hoặc có đang rảnh không.",
+            parameters: {
+              type: "OBJECT",
+              properties: {}
+            }
+          },
+          {
+            name: "read_table_info",
+            description:
+              "Đọc thông tin bàn từ backend. Nếu truyền table_number thì trả order/items của bàn đó; nếu không truyền thì trả trạng thái tổng quan của tất cả bàn.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                table_number: {
+                  type: "INTEGER",
+                  description:
+                    "Số bàn cần đọc. Có thể bỏ trống để lấy danh sách/tổng quan tất cả bàn."
+                }
+              }
+            }
+          },
+          {
+            name: "read_menu",
+            description:
+              "Đọc menu nhà hàng từ file data.js ở frontend để trả lời câu hỏi về món, giá, mô tả, nguyên liệu, tình trạng available và tư vấn món cho khách. Phải gọi tool này trước khi tư vấn menu.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                query: {
+                  type: "STRING",
+                  description:
+                    "Từ khóa hoặc nhu cầu cần tìm trong menu, ví dụ: 'bò', 'món cay', 'cà phê'. Để chuỗi rỗng nếu muốn đọc toàn bộ menu."
+                },
+                max_price: {
+                  type: "NUMBER",
+                  description:
+                    "Giá tối đa tính bằng VND nếu khách có giới hạn ngân sách. Bỏ trống nếu không giới hạn."
+                },
+                available_only: {
+                  type: "BOOLEAN",
+                  description:
+                    "Mặc định true: chỉ trả các món đang available."
+                }
+              }
+            }
+          },
           {
             name: "check_table_food",
             description:
@@ -776,6 +861,210 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
     name,
     args
   ) {
+    if (
+      name ===
+      "read_robot_context"
+    ) {
+      const context =
+        this.getRobotContext?.() || {};
+
+      const robotNumber = Number(
+        context.robot_number ||
+        this.getRobotNumber?.() ||
+        1
+      );
+
+      const robot =
+        context.robot && typeof context.robot === "object"
+          ? context.robot
+          : {};
+
+      const status = String(
+        robot.status || context.status || "available"
+      )
+        .trim()
+        .toLowerCase();
+
+      const task =
+        robot.tasks &&
+        typeof robot.tasks === "object" &&
+        !Array.isArray(robot.tasks)
+          ? robot.tasks
+          : null;
+
+      const foodName = String(
+        task?.food_name || ""
+      ).trim();
+
+      const tableNumber = Number(task?.table);
+      const hasTable = Number.isFinite(tableNumber) && tableNumber > 0;
+
+      const missionText = (() => {
+        const foodPart = foodName
+          ? `món ${foodName}`
+          : "món trong nhiệm vụ hiện tại";
+
+        const tablePart = hasTable
+          ? `bàn ${tableNumber}`
+          : "bàn đích trong nhiệm vụ";
+
+        if (status === "available") {
+          return "Đang sẵn sàng làm việc và hiện chưa có nhiệm vụ đang thực hiện.";
+        }
+
+        if (status === "received_task") {
+          return `Đã nhận nhiệm vụ chuẩn bị giao ${foodPart} tới ${tablePart}, nhưng chưa bắt đầu chạy. Đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.`;
+        }
+
+        if (status === "on_task") {
+          return `Đang thực hiện nhiệm vụ giao ${foodPart} tới ${tablePart}.`;
+        }
+
+        if (status === "on_target") {
+          return `Đã đến ${tablePart} với ${foodPart} và đang chờ khách lấy món khỏi robot.`;
+        }
+
+        if (
+          status === "on_home" ||
+          status === "come_home" ||
+          status === "come_back"
+        ) {
+          return "Đã hoàn tất phần giao món và đang trên đường trở về vị trí chờ của robot.";
+        }
+
+        if (status === "abnormal_behavior") {
+          return "Robot đang ở trạng thái hoạt động bất thường. Chưa có dữ liệu xác định nguyên nhân cụ thể.";
+        }
+
+        return `Trạng thái công việc hiện tại là ${status || "không xác định"}.`;
+      })();
+
+      return {
+        success: true,
+        source: "frontend_runtime_state",
+        robot_number: robotNumber,
+        robot_key: context.robot_key || `robot_${robotNumber}`,
+        alive: String(context.alive || "disconnected").toLowerCase(),
+        status,
+        work_summary: missionText,
+        tasks: task,
+        has_food_frontend: context.has_food_frontend ?? null,
+        food_state_label: context.food_state_label || "",
+        robot,
+        all_robots: context.all_robots || {}
+      };
+    }
+
+    if (
+      name ===
+      "read_table_info"
+    ) {
+      const tableNumber = Number(args?.table_number);
+
+      if (Number.isFinite(tableNumber) && tableNumber > 0) {
+        const result = await this.authFetch(
+          `/orders/table/${tableNumber}`,
+          { method: "GET" }
+        );
+
+        return {
+          success: true,
+          source: "backend/orders/table",
+          ...result
+        };
+      }
+
+      const result = await this.authFetch(
+        "/orders/tables/status",
+        { method: "GET" }
+      );
+
+      return {
+        success: true,
+        source: "backend/orders/tables/status",
+        ...result
+      };
+    }
+
+    if (
+      name ===
+      "read_menu"
+    ) {
+      const menu = Array.isArray(window.MENU_DATA)
+        ? window.MENU_DATA
+        : [];
+
+      if (!menu.length) {
+        throw new Error(
+          "Không đọc được MENU_DATA từ data.js."
+        );
+      }
+
+      const query = String(args?.query || "")
+        .trim()
+        .toLocaleLowerCase("vi-VN");
+
+      const maxPriceRaw = Number(args?.max_price);
+      const hasMaxPrice = Number.isFinite(maxPriceRaw) && maxPriceRaw >= 0;
+
+      const availableOnly =
+        args?.available_only !== false;
+
+      const normalize = (value) =>
+        String(value ?? "")
+          .trim()
+          .toLocaleLowerCase("vi-VN");
+
+      const items = menu.filter((item) => {
+        if (availableOnly && item.available !== true) {
+          return false;
+        }
+
+        if (hasMaxPrice && Number(item.price) > maxPriceRaw) {
+          return false;
+        }
+
+        if (!query) {
+          return true;
+        }
+
+        const searchable = [
+          item.id,
+          item.name,
+          ...(Array.isArray(item.aliases) ? item.aliases : []),
+          item.description,
+          ...(Array.isArray(item.ingredients) ? item.ingredients : [])
+        ]
+          .map(normalize)
+          .join(" ");
+
+        return searchable.includes(query);
+      });
+
+      return {
+        success: true,
+        source: "frontend/data.js",
+        query,
+        max_price: hasMaxPrice ? maxPriceRaw : null,
+        available_only: availableOnly,
+        total_menu_items: menu.length,
+        matched_count: items.length,
+        items: items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          aliases: Array.isArray(item.aliases) ? item.aliases : [],
+          price: Number(item.price),
+          currency: item.currency || "VND",
+          unit: item.unit || "phần",
+          description: item.description || "",
+          ingredients: Array.isArray(item.ingredients)
+            ? item.ingredients
+            : [],
+          available: item.available === true
+        }))
+      };
+    }
+
     if (
       name ===
       "check_table_food"
