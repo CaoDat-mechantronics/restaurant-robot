@@ -14,7 +14,7 @@ window.APP_CONFIG = {
   // Aoede là một prebuilt voice nữ; accent Bắc/Nam không phải là
   // một tham số riêng của Live API, nên giọng Hà Nội được ràng buộc
   // thêm bằng system instruction trong gemini-live.js.
-  GEMINI_VOICE_NAME: "Achernar", // "Leda" | "Achernar" | "Aoede" | "Syrma" | "Antares" | "Bellatrix"
+  GEMINI_VOICE_NAME: "Zephyr", // "Leda" | "Achernar" | "Aoede" | "Syrma" | "Antares" | "Bellatrix"
 
   // =====================================================
   // HIVEMQ CLOUD - FRONTEND MQTT OVER WEBSOCKET

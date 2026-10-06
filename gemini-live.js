@@ -341,7 +341,7 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
         );
 
         this.onDebug(
-          `Gemini voice=${window.APP_CONFIG.GEMINI_VOICE_NAME || "Leda"} · Vietnamese/Hanoi style requested by system instruction`
+          `Gemini voice=${window.APP_CONFIG.GEMINI_VOICE_NAME || "Erinome"} · Vietnamese/Hanoi style requested by system instruction`
         );
 
         const setupMessage = {
