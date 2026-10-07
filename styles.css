@@ -3043,6 +3043,19 @@ body.debug-mode-enabled #cameraSwitchButton {
   font-weight: 800;
 }
 
+.reset-icon {
+  font-size: 19px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.top-reset-button:hover,
+.top-reset-button:focus-visible {
+  border-color: #ff7c7c99;
+  color: #ffd6d6;
+  background: #3a1c28;
+}
+
 .map-panel {
   width: min(470px, calc(100vw - 36px));
 }
@@ -3146,8 +3159,8 @@ body.debug-mode-enabled #cameraSwitchButton {
 
 /* =========================================================
    RESPONSIVE TOP TOOLS MENU
-   Desktop: Settings + Map stay visible as separate icons.
-   Mobile:  Settings + Map move into the hamburger menu placed
+   Desktop: Settings + Map + Reset stay visible as separate icons.
+   Mobile:  Settings + Map + Reset move into the hamburger menu placed
             immediately to the right of Logout.
    ========================================================= */
 
@@ -3237,16 +3250,28 @@ body.debug-mode-enabled #cameraSwitchButton {
 }
 
 .top-tools-menu-item .settings-icon,
-.top-tools-menu-item .map-icon {
+.top-tools-menu-item .map-icon,
+.top-tools-menu-item .reset-icon {
   width: 20px;
   flex: 0 0 20px;
   text-align: center;
 }
 
+.top-tools-menu-item-danger {
+  color: #ffb9b9;
+}
+
+.top-tools-menu-item-danger:hover,
+.top-tools-menu-item-danger:focus-visible {
+  color: #ffe1e1;
+  background: #3a1c28;
+}
+
 @media (max-width: 820px) {
-  /* Hai nút riêng chỉ dành cho desktop. */
+  /* Ba nút riêng chỉ dành cho desktop. */
   #settingsButton,
-  #mapButton {
+  #mapButton,
+  #resetRobotButton {
     display: none !important;
   }
 

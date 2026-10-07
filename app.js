@@ -1431,6 +1431,83 @@
   }
 
   // =====================================================
+  // RESET ROBOT
+  // =====================================================
+
+  async function resetSelectedRobot() {
+    const robotNumber = Number(state.robot || 1);
+    const robot = state.robots[robotKey()] || {};
+    const task = robot?.tasks;
+    const hasTask = Boolean(
+      task &&
+      typeof task === "object" &&
+      !Array.isArray(task) &&
+      Object.keys(task).length > 0
+    );
+
+    const taskDescription = hasTask
+      ? `\nNhiệm vụ hiện tại: ${task.food_name || task.item_name || task.task_type || "task"}` +
+        `${task.table != null ? ` → bàn ${task.table}` : ""}.`
+      : "\nRobot hiện không có task trong dữ liệu frontend.";
+
+    const confirmed = window.confirm(
+      `Bạn có chắc muốn RESET Robot ${robotNumber}?` +
+      taskDescription +
+      `\n\nSau khi xác nhận, robot sẽ được gửi lệnh STOP, task sẽ bị xóa trong database và Work sẽ trở về AVAILABLE.` +
+      `\nNếu đây là task giao món chưa hoàn tất, trạng thái dispatch của món cũng sẽ được rollback để có thể giao lại.`
+    );
+
+    // Không gửi STOP, không xóa state local và không update database trước confirm.
+    if (!confirmed) return;
+
+    const resetButtons = [$("resetRobotButton"), $("topMenuResetButton")].filter(Boolean);
+    resetButtons.forEach((button) => { button.disabled = true; });
+
+    try {
+      // Dừng robot trước khi xóa task DB để robot không tiếp tục chạy với task đã mất.
+      try {
+        window.ROBOT_CONTROL?.stop?.("RESET ROBOT");
+      } catch (_) {}
+
+      const result = await api(
+        "/robot-ai/reset",
+        {
+          method: "POST",
+          body: JSON.stringify({ robot: robotNumber })
+        }
+      );
+
+      // Backend đã reset thành công: lúc này mới xóa snapshot task/pending local.
+      try {
+        window.ROBOT_CONTROL?.resetRuntimeStateAfterServerReset?.();
+      } catch (_) {}
+
+      const key = `robot_${robotNumber}`;
+      state.robots[key] = {
+        ...(state.robots[key] || {}),
+        ...(result?.robot_state || {}),
+        status: "available",
+        tasks: ""
+      };
+
+      renderSelectedRobotStatus();
+      await refreshStatus({ silent: true });
+
+      const rollbackText = result?.item_rolled_back
+        ? " Món đang dispatch đã được trả về trạng thái chờ để có thể giao lại."
+        : "";
+      alert(`Đã reset Robot ${robotNumber}: xóa task và đưa Work về AVAILABLE.${rollbackText}`);
+      log(`RESET ROBOT SUCCESS robot=${robotNumber} rolled_back=${Boolean(result?.item_rolled_back)}`);
+    } catch (error) {
+      log(`RESET ROBOT ERROR robot=${robotNumber}: ${error.message}`);
+      alert(`Reset Robot ${robotNumber} thất bại: ${error.message}`);
+      try { await refreshStatus({ silent: true }); } catch (_) {}
+    } finally {
+      resetButtons.forEach((button) => { button.disabled = false; });
+    }
+  }
+
+  // =====================================================
   // LOGOUT
   // =====================================================
 
@@ -1537,6 +1614,18 @@
         logout(true);
       }
     );
+
+  // =====================================================
+  // RESET BUTTONS (desktop + mobile menu)
+  // =====================================================
+
+  $("resetRobotButton")?.addEventListener("click", () => {
+    void resetSelectedRobot();
+  });
+
+  $("topMenuResetButton")?.addEventListener("click", () => {
+    void resetSelectedRobot();
+  });
 
   // =====================================================
   // ROBOT SELECT

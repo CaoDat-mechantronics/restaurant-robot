@@ -2229,6 +2229,44 @@
     closeCameraDebug();
   }
 
+  function resetRuntimeStateAfterServerReset() {
+    // Chỉ xóa state nhiệm vụ local SAU KHI backend reset thành công.
+    // Không thay đổi has_food: đó là trạng thái vật lý do ESP32/topic/mon quyết định.
+    cancelManualTurn({ sendStop: false, clearStorage: true });
+    clearOfficialTurnTimer();
+    if (officialRouteSession.active || officialRouteSession.phase !== "idle") {
+      resetOfficialRouteSession();
+    } else {
+      setOfficialStartButtonState(false);
+    }
+
+    stopLocalNavigationForDebug("reset robot");
+
+    controlState.pendingDelivery = null;
+    controlState.currentDispatch = null;
+    controlState.latestTask = null;
+    controlState.dispatching = false;
+    controlState.robotStatus = "available";
+    controlState.navigationStarting = false;
+    controlState.navigationTaskKey = null;
+    controlState.blockedResumeTaskKey = null;
+    controlState.manualSavedTask = null;
+
+    try { localStorage.removeItem(OFFICIAL_TASK_STORAGE_KEY); } catch (_) {}
+    clearSavedDebugTurnSettings();
+
+    const pendingCard = $("pendingDeliveryCard");
+    if (pendingCard) pendingCard.hidden = true;
+
+    try { vision.stop(); } catch (_) {}
+    closeCameraDebug();
+    setManualAngleDisplay(0, 0);
+    setManualControlState("Sẵn sàng");
+    setDebugAvailability(true);
+    setMessage("Đã reset nhiệm vụ. Robot đang AVAILABLE và chưa có task.");
+    log(`LOCAL RESET COMPLETE robot=${controlState.robot}`);
+  }
+
   function switchRobot(robotNumber) {
     const next = Number(robotNumber) || 1;
 
@@ -2498,6 +2536,7 @@
     vision,
     orientation,
     stop: stopEverything,
+    resetRuntimeStateAfterServerReset,
     preparePermissions,
     manualTurn,
     manualSteer,

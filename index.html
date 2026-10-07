@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20261007-mobile-tools-menu-1"
+    href="styles.css?v=20261007-reset-robot-1"
   >
 </head>
 
@@ -65,6 +65,17 @@
         <span class="top-button-label">Map</span>
       </button>
 
+      <button
+        id="resetRobotButton"
+        class="top-icon-button top-reset-button"
+        type="button"
+        title="Reset robot"
+        aria-label="Reset robot đang chọn"
+      >
+        <span class="reset-icon" aria-hidden="true">↻</span>
+        <span class="top-button-label">Reset</span>
+      </button>
+
       <label
         class="debug-switch top-debug-switch"
         title="Bật hoặc tắt giao diện debug"
@@ -97,8 +108,8 @@
 
       <!--
         Mobile tools menu:
-        - Desktop: Cài đặt + Map vẫn hiển thị thành 2 icon riêng như hiện tại.
-        - Mobile: 2 icon riêng được ẩn và chuyển vào menu này để topbar gọn hơn.
+        - Desktop: Cài đặt + Map + Reset hiển thị thành icon riêng.
+        - Mobile: 3 nút được ẩn và chuyển vào menu này để topbar gọn hơn.
       -->
       <div class="top-tools-menu">
         <button
@@ -138,6 +149,16 @@
           >
             <span class="map-icon" aria-hidden="true">⌖</span>
             <span>Map</span>
+          </button>
+
+          <button
+            id="topMenuResetButton"
+            class="top-tools-menu-item top-tools-menu-item-danger"
+            type="button"
+            role="menuitem"
+          >
+            <span class="reset-icon" aria-hidden="true">↻</span>
+            <span>Reset robot</span>
           </button>
         </div>
       </div>
@@ -1057,8 +1078,8 @@
 <script src="orientation.js?v=20260930-audioworklet-1"></script>
 <script src="vision.js?v=20261002-qr-red-overlay-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
-<script src="app.js?v=20261004-received-task-qr-area-1"></script>
-<script src="robot-control.js?v=20261004-received-task-qr-area-1"></script>
+<script src="app.js?v=20261007-reset-robot-1"></script>
+<script src="robot-control.js?v=20261007-reset-robot-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
@@ -1125,6 +1146,7 @@
   const topToolsMenu = document.getElementById("topToolsMenu");
   const topMenuSettingsButton = document.getElementById("topMenuSettingsButton");
   const topMenuMapButton = document.getElementById("topMenuMapButton");
+  const topMenuResetButton = document.getElementById("topMenuResetButton");
   const settingsOverlay = document.getElementById("settingsOverlay");
   const settingsPanel = document.getElementById("settingsPanel");
   const settingsCloseButton = document.getElementById("settingsCloseButton");
@@ -1745,6 +1767,12 @@
 
   topMenuMapButton?.addEventListener("click", () => {
     openMap({ returnFocus: topMenuButton });
+  });
+
+  // Reset thực tế được xử lý trong app.js để dùng chung cho desktop/mobile.
+  // Ở đây chỉ đóng menu sau khi người dùng bấm mục Reset.
+  topMenuResetButton?.addEventListener("click", () => {
+    closeTopMenu();
   });
 
   mapCloseButton?.addEventListener("click", closeMap);
