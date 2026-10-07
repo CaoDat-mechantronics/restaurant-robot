@@ -9,7 +9,8 @@ class GeminiRobotLive {
     onToolResult = () => {},
     onDebug = () => {},
     onLevel = () => {},
-    onStopListening = () => {}
+    onStopListening = () => {},
+    onTurnComplete = () => {}
   }) {
     this.apiBase = apiBase.replace(/\/+$/, "");
 
@@ -22,6 +23,7 @@ class GeminiRobotLive {
     this.onToolResult = onToolResult;
     this.onDebug = onDebug;
     this.onStopListening = onStopListening;
+    this.onTurnComplete = onTurnComplete;
 
     this.socket = null;
     this.ready = false;
@@ -104,7 +106,7 @@ QUY TẮC NHẬN BIẾT ROBOT VÀ CÔNG VIỆC HIỆN TẠI:
 
 3. Diễn giải work status như sau:
    - available: trả lời rằng em đang sẵn sàng làm việc và hiện chưa có nhiệm vụ đang thực hiện.
-   - received_task: đọc tasks để nói rõ em đã nhận nhiệm vụ chuẩn bị giao món gì tới bàn nào nhưng chưa bắt đầu chạy; hiện đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.
+   - received_task: đọc tasks để nói rõ em đã nhận nhiệm vụ chuẩn bị giao món gì tới bàn nào nhưng chưa bắt đầu chạy; có thể bắt đầu bằng nút BẮT ĐẦU hoặc lời nói "giao món đi".
    - on_task: đọc tasks để nói rõ em đang thực hiện nhiệm vụ giao món gì tới bàn nào; nếu route có line/hướng rẽ thì chỉ nêu khi người dùng hỏi chi tiết.
    - on_target: đọc tasks để nói rõ em đã đến bàn đích nào với món gì và đang chờ khách lấy món khỏi robot.
    - on_home, come_home hoặc come_back: trả lời rằng em đã hoàn tất phần giao món và đang trên đường trở về vị trí chờ của robot.
@@ -130,48 +132,42 @@ QUY TẮC TƯ VẤN MENU BẮT BUỘC:
 
 6. read_menu chỉ dùng để tra cứu/tư vấn menu. Nếu khách yêu cầu GIAO một món tới bàn, sau khi xác định món vẫn phải tuân theo quy trình check_table_food → xác nhận → prepare_delivery ở bên dưới.
 
-QUY TẮC NGHIỆP VỤ BẮT BUỘC:
+QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
 
-1. Khi người dùng yêu cầu mang/giao món tới một bàn,
-   phải xác định rõ tên món và số bàn.
+1. Với MỌI yêu cầu giao/mang món tới bàn, trước hết LUÔN gọi read_robot_context để đọc status và task thật của robot. Không nhận task mới chỉ dựa vào nội dung hội thoại.
 
-2. LUÔN gọi function check_table_food trước khi xác nhận món tồn tại.
+2. Nếu status=abnormal_behavior: KHÔNG nhận task và nói theo ý: "Đang có vấn đề với robot, vui lòng kiểm tra ạ."
 
-3. Tuyệt đối không tự bịa item_id, tên món, số bàn, Line, hướng rẽ, stop_index hoặc trạng thái món.
+3. Nếu status=on_task, on_target, on_home, come_home hoặc come_back: KHÔNG nhận task mới. Đọc tasks và nói theo ý: "Em đang bận giao món {x} tới bàn {y}, em sẽ trở lại ngay ạ."
 
-4. Nếu check_table_food trả found=false hoặc deliverable=false:
-   - giải thích ngắn gọn theo đúng tool result;
-   - KHÔNG gọi prepare_delivery.
+4. Nếu status=received_task, đây là trạng thái đặc biệt vì robot đã nhận task nhưng chưa chạy:
+   - vẫn phải xác định rõ món mới và bàn mới rồi gọi check_table_food để đối chiếu;
+   - nếu check_table_food trả same_as_current_task=true, hoặc yêu cầu có cùng food_name + table với task hiện tại, coi là CÙNG NHIỆM VỤ. Khi đó KHÔNG tạo task mới, kể cả món đang dispatched; chỉ nói: "Em đã sẵn sàng, hãy bấm Bắt đầu hoặc ra lệnh giao món đi ạ."
+   - nếu nhiệm vụ mới KHÁC task hiện tại và món mới deliverable=true, phải hỏi quản lý có muốn bỏ nhiệm vụ cũ để thay bằng nhiệm vụ mới hay không. Nêu rõ nhiệm vụ cũ và nhiệm vụ mới.
+   - chỉ khi quản lý xác nhận thay task mới gọi prepare_task_replacement. Không tự ghi đè task.
+   - sau khi prepare_task_replacement trả accepted=true, đọc field prompt của tool và nói đúng yêu cầu đó cho quản lý; frontend sẽ dùng cảm biến để tiếp tục các bước lấy món cũ/đặt món mới.
+   - nếu quản lý không xác nhận thay task, giữ task cũ và nói hãy bấm Bắt đầu hoặc ra lệnh "giao món đi" để giao nhiệm vụ trước đó.
 
-5. Nếu found=true và deliverable=true:
-   - đọc lại tên món, số bàn, Line và hướng rẽ;
-   - hỏi người dùng xác nhận trước khi nhận nhiệm vụ.
+5. Nếu status=available:
+   - xác định rõ food_name và table_number;
+   - gọi check_table_food;
+   - nếu found=false hoặc deliverable=false thì giải thích đúng tool result và KHÔNG gọi prepare_delivery;
+   - nếu found=true và deliverable=true, đọc lại tên món, số bàn, Line và hướng rẽ rồi hỏi xác nhận;
+   - chỉ sau xác nhận rõ ràng mới gọi prepare_delivery.
 
-6. CHỈ sau khi người dùng xác nhận rõ ràng như "đồng ý", "xác nhận", "giao đi", "ok"
-   mới gọi prepare_delivery.
+6. prepare_delivery phải tôn trọng Alive. Nếu tool trả robot_not_alive/disconnected, nói "Hãy bật robot lên ạ." và không tạo pending dispatch. Nếu robot alive nhưng chưa có món, nói "Đã nhận yêu cầu - hãy mau đặt món lên robot ạ." Frontend sẽ chờ topic/mon current=0 rồi tự gọi confirm-dispatch.
 
-7. prepare_delivery KHÔNG cho robot chạy ngay. Nó chỉ chuyển frontend sang trạng thái:
-   "đã nhận nhiệm vụ - chờ đặt món lên robot".
+7. Route luôn do backend quyết định. Tuyệt đối không tự bịa hoặc tự sửa item_id, table, line, junction_turn, stop_index, command_id.
 
-8. Sau prepare_delivery thành công, nói rõ:
-   - nhiệm vụ đã được nhận;
-   - hãy đặt món lên robot;
-   - robot chỉ bắt đầu dispatch khi cảm biến món của ESP32 (topic/mon) báo đã có món.
+8. Khi status=received_task và người dùng nói "giao món đi", "bắt đầu giao", "đi giao đi" hoặc yêu cầu bắt đầu nhiệm vụ hiện tại, gọi start_delivery. Tool này dùng cùng luồng với nút BẮT ĐẦU trên giao diện.
 
-9. Nếu người dùng đổi món hoặc đổi bàn trước khi xác nhận, phải gọi check_table_food lại.
+9. Khi robot đang on_target và khách nói theo hướng không cần hỗ trợ thêm như "không cần", "cảm ơn", "thôi", "được rồi", KHÔNG gọi stop_listening. Hãy gọi finish_table_support để frontend nói câu chào bàn và bắt đầu hành trình trở về.
 
-10. Route do backend quyết định. Không tự tính hoặc sửa route.
+10. stop_listening chỉ dùng để kết thúc phiên nói chuyện thông thường khi robot KHÔNG ở giai đoạn hỗ trợ tại bàn. Không gọi stop_listening cho lời xác nhận giao món, lời "giao món đi", hoặc lời từ chối hỗ trợ khi status=on_target.
 
-11. Khi người dùng thể hiện rõ là không cần hỗ trợ thêm hoặc muốn kết thúc phiên,
-    ví dụ: "được rồi", "thôi được rồi", "không cần nữa", "cảm ơn, thế thôi",
-    "xong rồi", "dừng nghe", hãy gọi function stop_listening.
-    Không gọi stop_listening khi người dùng chỉ nói "đồng ý", "ok" hoặc "xác nhận"
-    trong lúc xác nhận nhiệm vụ giao món.
+11. Khi stop_listening trả success=true, nói đúng một câu kết thúc lịch sự: "Nếu không có việc gì nữa thì em xin phép ạ, cần gì thì cứ gọi em ạ." rồi không hỏi thêm.
 
-12. Khi stop_listening trả về success=true, PHẢI nói một câu chào kết thúc lịch sự trước
-    khi phiên đóng. Ưu tiên nói đúng câu:
-    "Nếu không có việc gì nữa thì em xin phép ạ, cần gì thì cứ gọi em ạ."
-    Không hỏi thêm câu hỏi nào sau lời chào này.
+12. Các câu thông báo tự động khi tới bàn, chờ hỗ trợ, trở về station và hoàn thành giao món do frontend điều phối. Khi nhận một yêu cầu hệ thống bảo nói đúng nguyên văn, phải nói đúng câu đó và không thêm nội dung ngoài câu được yêu cầu.
 `;
   }
 
@@ -268,6 +264,43 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
                 }
               },
               required: ["item_id", "table_number"]
+            }
+          },
+          {
+            name: "prepare_task_replacement",
+            description:
+              "Chỉ dùng khi robot đang RECEIVED TASK, nhiệm vụ mới khác nhiệm vụ cũ, món mới đã check_table_food và quản lý đã xác nhận bỏ task cũ để thay bằng task mới. Frontend sẽ yêu cầu lấy món cũ ra, đặt món mới vào rồi mới thay database.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                item_id: {
+                  type: "INTEGER",
+                  description: "ID món mới chính xác do check_table_food trả về."
+                },
+                table_number: {
+                  type: "INTEGER",
+                  description: "Số bàn của nhiệm vụ mới."
+                }
+              },
+              required: ["item_id", "table_number"]
+            }
+          },
+          {
+            name: "start_delivery",
+            description:
+              "Bắt đầu task hiện tại khi robot đang RECEIVED TASK và người quản lý nói giao món đi/bắt đầu giao. Dùng cùng luồng với nút BẮT ĐẦU trên frontend.",
+            parameters: {
+              type: "OBJECT",
+              properties: {}
+            }
+          },
+          {
+            name: "finish_table_support",
+            description:
+              "Dùng khi robot đang ON TARGET và khách nói không cần hỗ trợ thêm/cảm ơn/thôi. Frontend sẽ nói lời chào bàn rồi chuyển robot sang ON HOME để trở về.",
+            parameters: {
+              type: "OBJECT",
+              properties: {}
             }
           },
           {
@@ -718,6 +751,18 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
           : "ready"
       );
 
+      // turnComplete chỉ có nghĩa Gemini đã phát xong dữ liệu từ server; PCM
+      // có thể vẫn còn trong hàng đợi loa. Chờ phần audio đã queue phát hết để
+      // các state nghiệp vụ bắt đầu đúng sau câu nói (đặc biệt timer 10 giây
+      // tại bàn và update delivered sau câu báo hoàn thành).
+      try {
+        await this.audio.waitForPlaybackDrain?.();
+      } catch (_) {}
+
+      try {
+        this.onTurnComplete();
+      } catch (_) {}
+
       // Sau stop_listening, turn này là lời chào kết thúc của Gemini.
       // Chờ thêm một khoảng để PCM đã queue phát hết rồi mới đóng socket,
       // tránh cắt ngang câu nói ở cuối.
@@ -929,9 +974,9 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
 
         if (status === "received_task") {
           if (taskType === "food_delivery") {
-            return `Đã nhận nhiệm vụ chuẩn bị giao ${foodPart} tới ${tablePart}, nhưng chưa bắt đầu chạy. Đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.`;
+            return `Đã nhận nhiệm vụ chuẩn bị giao ${foodPart} tới ${tablePart}, nhưng chưa bắt đầu chạy. Có thể bấm BẮT ĐẦU hoặc ra lệnh "giao món đi" để thực thi.`;
           }
-          return `Đã nhận nhiệm vụ loại ${taskType || "không xác định"} nhưng chưa bắt đầu chạy. Đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.`;
+          return `Đã nhận nhiệm vụ loại ${taskType || "không xác định"} nhưng chưa bắt đầu chạy. Có thể bấm BẮT ĐẦU hoặc ra lệnh bắt đầu.`;
         }
 
         if (status === "on_task") {
@@ -953,7 +998,10 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
           status === "come_home" ||
           status === "come_back"
         ) {
-          return "Đã hoàn tất phần giao món và đang trên đường trở về vị trí chờ của robot.";
+          if (taskType === "food_delivery") {
+            return `Đã giao ${foodPart} tới ${tablePart} và đang trên đường trở về vị trí chờ của robot.`;
+          }
+          return "Đang trên đường trở về vị trí chờ của robot.";
         }
 
         if (status === "abnormal_behavior") {
@@ -1094,25 +1142,93 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
       name ===
       "check_table_food"
     ) {
+      const requestedTable = Number(args.table_number);
+      const requestedFood = String(args.food_name || "");
       const result = await this.authFetch(
         "/robot-ai/check-food",
         {
           method: "POST",
           body: JSON.stringify({
-            table_number: Number(args.table_number),
-            food_name: String(args.food_name || "")
+            table_number: requestedTable,
+            food_name: requestedFood
           })
         }
       );
 
-      this.lastFoodCheck = result;
-      return result;
+      // Khi robot đang RECEIVED TASK, cùng món + cùng bàn được coi là cùng
+      // nhiệm vụ theo câu lệnh quản lý. Không phụ thuộc backend có chọn một
+      // order-item trùng tên khác hay món hiện tại đang ở trạng thái dispatched.
+      const context = this.getRobotContext?.() || {};
+      const robot = context.robot && typeof context.robot === "object"
+        ? context.robot
+        : {};
+      const status = String(robot.status || context.status || "available")
+        .trim()
+        .toLowerCase();
+      const currentTask = robot.tasks && typeof robot.tasks === "object" && !Array.isArray(robot.tasks)
+        ? robot.tasks
+        : null;
+      const normalizeTaskText = (value) => String(value || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const sameAsCurrentTask = Boolean(
+        status === "received_task" &&
+        currentTask &&
+        Number(currentTask.table) === requestedTable &&
+        normalizeTaskText(currentTask.food_name) === normalizeTaskText(requestedFood)
+      );
+
+      const enriched = {
+        ...result,
+        same_as_current_task: sameAsCurrentTask,
+        current_task: status === "received_task" && currentTask
+          ? { ...currentTask }
+          : null
+      };
+
+      this.lastFoodCheck = enriched;
+      return enriched;
     }
 
     if (
       name ===
       "prepare_delivery"
     ) {
+      const context = this.getRobotContext?.() || {};
+      const robot = context.robot && typeof context.robot === "object"
+        ? context.robot
+        : {};
+      const status = String(robot.status || context.status || "available")
+        .trim()
+        .toLowerCase();
+      const alive = String(context.alive || "disconnected")
+        .trim()
+        .toLowerCase();
+
+      if (alive !== "alive") {
+        return {
+          success: true,
+          accepted: false,
+          reason: "robot_not_alive",
+          message: "Hãy bật robot lên ạ."
+        };
+      }
+
+      if (status !== "available") {
+        return {
+          success: true,
+          accepted: false,
+          reason: "robot_not_available",
+          status,
+          message: "Robot không ở trạng thái AVAILABLE nên không thể nhận task mới theo luồng này."
+        };
+      }
+
       const checked = this.lastFoodCheck;
 
       if (!checked?.found || !checked?.deliverable || !checked?.item) {
@@ -1135,13 +1251,181 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
       return {
         success: true,
         accepted: true,
-        waiting_for_food: true,
+        waiting_for_food: context.has_food_frontend !== true,
+        has_food_frontend: context.has_food_frontend ?? null,
         item_id: checkedItemId,
         table_number: checkedTable,
         table: checkedTable,
         food_name: checked.item.food_name,
         route: checked.route,
-        message: "Đã nhận nhiệm vụ. Đang chờ cảm biến món của ESP32 xác nhận món đã được đặt lên robot."
+        message: context.has_food_frontend === true
+          ? "Món đã có trên robot. Frontend sẽ commit dispatch ngay."
+          : "Đã nhận yêu cầu. Hãy mau đặt món lên robot."
+      };
+    }
+
+    if (
+      name ===
+      "prepare_task_replacement"
+    ) {
+      const context = this.getRobotContext?.() || {};
+      const robot = context.robot && typeof context.robot === "object"
+        ? context.robot
+        : {};
+      const status = String(robot.status || context.status || "available")
+        .trim()
+        .toLowerCase();
+      const alive = String(context.alive || "disconnected")
+        .trim()
+        .toLowerCase();
+      const oldTask = robot.tasks && typeof robot.tasks === "object" && !Array.isArray(robot.tasks)
+        ? robot.tasks
+        : null;
+
+      if (alive !== "alive") {
+        return {
+          success: true,
+          accepted: false,
+          reason: "robot_not_alive",
+          message: "Hãy bật robot lên ạ."
+        };
+      }
+
+      if (status !== "received_task" || !oldTask) {
+        throw new Error("Robot không còn ở RECEIVED TASK để thay nhiệm vụ.");
+      }
+
+      const checked = this.lastFoodCheck;
+      if (!checked?.found || !checked?.deliverable || !checked?.item) {
+        throw new Error("Món mới chưa có kết quả check_table_food hợp lệ/deliverable.");
+      }
+
+      const itemId = Number(args.item_id);
+      const tableNumber = Number(args.table_number);
+      const checkedItemId = Number(checked.item.id);
+      const checkedTable = Number(checked.table_number);
+
+      if (itemId !== checkedItemId || tableNumber !== checkedTable) {
+        throw new Error("Món mới không khớp kết quả check_table_food gần nhất.");
+      }
+      const normalizeTaskText = (value) => String(value || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/đ/g, "d")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const sameTask =
+        Number(oldTask.item_id) === checkedItemId ||
+        (
+          Number(oldTask.table) === checkedTable &&
+          normalizeTaskText(oldTask.food_name) === normalizeTaskText(checked.item.food_name)
+        );
+
+      if (sameTask) {
+        return {
+          success: true,
+          accepted: false,
+          same_task: true,
+          message: "Nhiệm vụ mới trùng task hiện tại. Hãy bấm Bắt đầu hoặc ra lệnh giao món đi."
+        };
+      }
+
+      const oldFoodName = String(oldTask.food_name || "món cũ");
+      const oldTable = Number(oldTask.table) || "hiện tại";
+      const newFoodName = String(checked.item.food_name || "món mới");
+      const hasFoodFrontend = context.has_food_frontend === true;
+      const prompt = hasFoodFrontend
+        ? `Vâng ạ, vui lòng lấy món ${oldFoodName} của bàn ${oldTable} ra khỏi robot trước ạ.`
+        : `Vâng ạ, vui lòng đặt món ${newFoodName} của bàn ${checkedTable} lên robot ạ.`;
+
+      return {
+        success: true,
+        accepted: true,
+        replacement: true,
+        old_task: { ...oldTask },
+        item_id: checkedItemId,
+        table_number: checkedTable,
+        table: checkedTable,
+        food_name: newFoodName,
+        route: checked.route,
+        has_food_frontend: context.has_food_frontend ?? null,
+        next_action: hasFoodFrontend ? "remove_old_food" : "place_new_food",
+        prompt,
+        message: "Đã xác nhận thay task. Frontend đang chờ thao tác món vật lý theo cảm biến trước khi cập nhật database."
+      };
+    }
+
+    if (
+      name ===
+      "start_delivery"
+    ) {
+      const context = this.getRobotContext?.() || {};
+      const robot = context.robot && typeof context.robot === "object"
+        ? context.robot
+        : {};
+      const status = String(robot.status || context.status || "available")
+        .trim()
+        .toLowerCase();
+      const alive = String(context.alive || "disconnected")
+        .trim()
+        .toLowerCase();
+      const task = robot.tasks && typeof robot.tasks === "object" && !Array.isArray(robot.tasks)
+        ? robot.tasks
+        : null;
+
+      if (alive !== "alive") {
+        return {
+          success: true,
+          accepted: false,
+          status,
+          message: "Hãy bật robot lên ạ."
+        };
+      }
+
+      if (status !== "received_task" || !task) {
+        return {
+          success: true,
+          accepted: false,
+          status,
+          message: "Robot chưa có task RECEIVED TASK để bắt đầu."
+        };
+      }
+
+      return {
+        success: true,
+        accepted: true,
+        task: { ...task },
+        message: "Frontend sẽ bắt đầu task hiện tại bằng cùng luồng với nút BẮT ĐẦU."
+      };
+    }
+
+    if (
+      name ===
+      "finish_table_support"
+    ) {
+      const context = this.getRobotContext?.() || {};
+      const robot = context.robot && typeof context.robot === "object"
+        ? context.robot
+        : {};
+      const status = String(robot.status || context.status || "available")
+        .trim()
+        .toLowerCase();
+
+      if (status !== "on_target") {
+        return {
+          success: true,
+          accepted: false,
+          status,
+          message: "Robot không ở ON TARGET nên không kết thúc hỗ trợ tại bàn."
+        };
+      }
+
+      return {
+        success: true,
+        accepted: true,
+        message: "Frontend sẽ nói lời chào tại bàn rồi chuyển robot sang ON HOME."
       };
     }
 

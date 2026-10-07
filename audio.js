@@ -20,6 +20,12 @@ class RobotAudio {
     // Prevent stale async mic/play operations from becoming active after stop.
     this.captureEpoch = 0;
     this.playEpoch = 0;
+
+    // Ước lượng thời điểm hàng đợi PCM phát xong. Không thay đổi pipeline audio;
+    // chỉ dùng để các state nghiệp vụ (10s hỗ trợ, complete delivery...) bắt đầu
+    // SAU KHI câu nói tự động thực sự đã phát xong, thay vì ngay lúc server
+    // báo turnComplete.
+    this.playbackQueuedUntil = 0;
   }
 
   static createOutputContext() {
@@ -201,6 +207,13 @@ class RobotAudio {
     const arrayBuffer = this.decodeBase64(base64);
     if (!arrayBuffer.byteLength) return;
 
+    // PCM16 mono: 2 byte/sample. Gemini gửi audio theo từng chunk. Cộng dồn
+    // duration để biết gần đúng lúc loa đã phát hết phần audio đã queue.
+    const durationMs = (arrayBuffer.byteLength / 2 / rate) * 1000;
+    const nowMs = performance.now();
+    const baseMs = Math.max(this.playbackQueuedUntil, nowMs + 100);
+    this.playbackQueuedUntil = baseMs + Math.max(0, durationMs);
+
     const workletReady = await this.ensureOutput();
 
     // If an interruption happened while AudioContext/worklet setup was pending,
@@ -244,8 +257,18 @@ class RobotAudio {
     source.onended = () => this.outSources.delete(source);
   }
 
+  async waitForPlaybackDrain(maxWaitMs = 15000) {
+    const nowMs = performance.now();
+    const remainingMs = Math.max(0, this.playbackQueuedUntil - nowMs + 120);
+    const waitMs = Math.min(Math.max(0, Number(maxWaitMs) || 0), remainingMs);
+    if (waitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+
   stopPlayback() {
     this.playEpoch++;
+    this.playbackQueuedUntil = performance.now();
 
     if (this.outNode) {
       // The worklet performs a short ramp to zero to avoid a click on interruption.

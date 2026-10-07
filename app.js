@@ -39,7 +39,10 @@
     wakeActive: false,
     wakeRestartTimer: null,
 
-    logs: []
+    logs: [],
+
+    // Ghép một yêu cầu nói tự động của robot với turnComplete tương ứng.
+    pendingRobotSpeechTags: []
   };
 
   // =====================================================
@@ -451,6 +454,14 @@
         .textContent =
         value;
     }
+
+    if (role === "user") {
+      window.dispatchEvent(
+        new CustomEvent("robot:user-transcript", {
+          detail: { text: value }
+        })
+      );
+    }
   }
 
   // =====================================================
@@ -567,15 +578,47 @@
 
         $("assistantText")
           .textContent =
-          `Đã nhận nhiệm vụ ${result.food_name} tới bàn ${result.table}. ` +
+          `Đã nhận yêu cầu ${result.food_name} tới bàn ${result.table}. ` +
           `Line ${result.route?.line ?? "-"} ${turn}. ` +
-          `Hãy đặt món lên robot.`;
+          (result.has_food_frontend === true
+            ? "Món đã có trên robot."
+            : "Hãy mau đặt món lên robot.");
 
         window.dispatchEvent(
           new CustomEvent(
             "robot:prepare-delivery",
             { detail: result }
           )
+        );
+      } else if (result?.message) {
+        $("assistantText").textContent = result.message;
+      }
+    }
+
+    if (name === "prepare_task_replacement") {
+      if (result?.accepted) {
+        window.dispatchEvent(
+          new CustomEvent("robot:prepare-task-replacement", { detail: result })
+        );
+      } else if (result?.message) {
+        $("assistantText").textContent = result.message;
+      }
+    }
+
+    if (name === "start_delivery") {
+      if (result?.accepted) {
+        window.dispatchEvent(
+          new CustomEvent("robot:start-delivery-request", { detail: result })
+        );
+      } else if (result?.message) {
+        $("assistantText").textContent = result.message;
+      }
+    }
+
+    if (name === "finish_table_support") {
+      if (result?.accepted) {
+        window.dispatchEvent(
+          new CustomEvent("robot:finish-table-support", { detail: result })
         );
       }
     }
@@ -908,6 +951,31 @@
           () => {
             log("GEMINI stop_listening -> wake mode");
             resumeWakeRecognition();
+          },
+
+        onTurnComplete:
+          () => {
+            const tag = state.pendingRobotSpeechTags.shift() || "";
+
+            window.dispatchEvent(
+              new CustomEvent("robot:gemini-turn-complete", {
+                detail: { tag }
+              })
+            );
+
+            if (tag) {
+              window.dispatchEvent(
+                new CustomEvent("robot:speech-complete", {
+                  detail: { tag }
+                })
+              );
+
+              // Các câu tự động với mic đã tắt tạm pause wake phrase để phát loa
+              // sạch hơn. Sau khi audio phát xong thì cho wake phrase hoạt động lại.
+              if (!state.live?.mic) {
+                resumeWakeRecognition();
+              }
+            }
           }
       });
 
@@ -1798,6 +1866,69 @@
         }
       }
     );
+
+  // =====================================================
+  // ROBOT AUTOMATIC SPEECH / CONTROL EVENTS
+  // =====================================================
+
+  async function speakRobotText(detail = {}) {
+    const text = String(detail.text || "").trim();
+    const tag = String(detail.tag || "").trim();
+    const listen = detail.listen === true;
+
+    if (!text) return;
+
+    try {
+      pauseWakeRecognition();
+
+      const live = getLive();
+
+      if (listen) {
+        if (!live.mic) {
+          await live.startMic();
+        }
+      } else {
+        await live.connect();
+      }
+
+      if (tag) {
+        state.pendingRobotSpeechTags.push(tag);
+      }
+
+      const quotedText = JSON.stringify(text);
+      await live.sendText(
+        `Hãy chỉ nói đúng nguyên văn câu sau, không thêm hoặc bớt nội dung: ${quotedText}`,
+        { showTranscript: false }
+      );
+    } catch (error) {
+      if (tag) {
+        const index = state.pendingRobotSpeechTags.indexOf(tag);
+        if (index >= 0) state.pendingRobotSpeechTags.splice(index, 1);
+      }
+
+      log(`ROBOT SPEECH ERROR tag=${tag || "-"}: ${error.message}`);
+      window.dispatchEvent(
+        new CustomEvent("robot:speech-failed", {
+          detail: { tag, error: error.message }
+        })
+      );
+    }
+  }
+
+  window.addEventListener("robot:speak-request", (event) => {
+    void speakRobotText(event?.detail || {});
+  });
+
+  window.addEventListener("robot:refresh-status", () => {
+    void refreshStatus({ silent: true });
+  });
+
+  window.addEventListener("robot:stop-gemini-mic", () => {
+    try {
+      state.live?.stopMic();
+    } catch (_) {}
+    resumeWakeRecognition();
+  });
 
   // =====================================================
   // FRONTEND-DRIVEN ROBOT ALIVE
