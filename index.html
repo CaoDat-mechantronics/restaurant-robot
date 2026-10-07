@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20261002-qr-only-1"
+    href="styles.css?v=20261007-mobile-tools-menu-1"
   >
 </head>
 
@@ -94,6 +94,53 @@
       >
         Đăng xuất
       </button>
+
+      <!--
+        Mobile tools menu:
+        - Desktop: Cài đặt + Map vẫn hiển thị thành 2 icon riêng như hiện tại.
+        - Mobile: 2 icon riêng được ẩn và chuyển vào menu này để topbar gọn hơn.
+      -->
+      <div class="top-tools-menu">
+        <button
+          id="topMenuButton"
+          class="top-menu-button"
+          type="button"
+          title="Menu"
+          aria-label="Mở menu"
+          aria-haspopup="menu"
+          aria-controls="topToolsMenu"
+          aria-expanded="false"
+        >
+          <span class="top-menu-icon" aria-hidden="true">☰</span>
+        </button>
+
+        <div
+          id="topToolsMenu"
+          class="top-tools-dropdown"
+          role="menu"
+          aria-hidden="true"
+        >
+          <button
+            id="topMenuSettingsButton"
+            class="top-tools-menu-item"
+            type="button"
+            role="menuitem"
+          >
+            <span class="settings-icon" aria-hidden="true">⚙</span>
+            <span>Cài đặt</span>
+          </button>
+
+          <button
+            id="topMenuMapButton"
+            class="top-tools-menu-item"
+            type="button"
+            role="menuitem"
+          >
+            <span class="map-icon" aria-hidden="true">⌖</span>
+            <span>Map</span>
+          </button>
+        </div>
+      </div>
 
     </div>
 
@@ -1074,6 +1121,10 @@
   );
 
   const settingsButton = document.getElementById("settingsButton");
+  const topMenuButton = document.getElementById("topMenuButton");
+  const topToolsMenu = document.getElementById("topToolsMenu");
+  const topMenuSettingsButton = document.getElementById("topMenuSettingsButton");
+  const topMenuMapButton = document.getElementById("topMenuMapButton");
   const settingsOverlay = document.getElementById("settingsOverlay");
   const settingsPanel = document.getElementById("settingsPanel");
   const settingsCloseButton = document.getElementById("settingsCloseButton");
@@ -1427,8 +1478,37 @@
     requestAnimationFrame(() => settingsAdvancedBackButton?.focus());
   };
 
-  const openSettings = () => {
+  let settingsReturnFocus = settingsButton;
+  let mapReturnFocus = mapButton;
+
+  const isTopMenuOpen = () =>
+    Boolean(topToolsMenu?.classList.contains("top-tools-dropdown-open"));
+
+  const closeTopMenu = ({ restoreFocus = false } = {}) => {
+    if (!topToolsMenu || !topMenuButton) return;
+    topToolsMenu.classList.remove("top-tools-dropdown-open");
+    topToolsMenu.setAttribute("aria-hidden", "true");
+    topMenuButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) topMenuButton.focus();
+  };
+
+  const openTopMenu = () => {
+    if (!topToolsMenu || !topMenuButton) return;
+    topToolsMenu.classList.add("top-tools-dropdown-open");
+    topToolsMenu.setAttribute("aria-hidden", "false");
+    topMenuButton.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => topMenuSettingsButton?.focus());
+  };
+
+  const toggleTopMenu = () => {
+    if (isTopMenuOpen()) closeTopMenu();
+    else openTopMenu();
+  };
+
+  const openSettings = ({ returnFocus = settingsButton } = {}) => {
     if (!settingsOverlay) return;
+    settingsReturnFocus = returnFocus || settingsButton;
+    closeTopMenu();
     if (settingsRobotSelect && robotSelect) {
       settingsRobotSelect.value = robotSelect.value;
     }
@@ -1445,7 +1525,7 @@
     settingsOverlay.setAttribute("aria-hidden", "true");
     settingsButton?.setAttribute("aria-expanded", "false");
     showBasicSettings({ focus: false });
-    settingsButton?.focus();
+    settingsReturnFocus?.focus?.();
   };
 
   let editableMapTables = [];
@@ -1569,8 +1649,10 @@
     }
   };
 
-  const openMap = () => {
+  const openMap = ({ returnFocus = mapButton } = {}) => {
     if (!mapOverlay) return;
+    mapReturnFocus = returnFocus || mapButton;
+    closeTopMenu();
     mapOverlay.classList.remove("settings-hidden");
     mapOverlay.setAttribute("aria-hidden", "false");
     mapButton?.setAttribute("aria-expanded", "true");
@@ -1583,7 +1665,7 @@
     mapOverlay.classList.add("settings-hidden");
     mapOverlay.setAttribute("aria-hidden", "true");
     mapButton?.setAttribute("aria-expanded", "false");
-    mapButton?.focus();
+    mapReturnFocus?.focus?.();
   };
 
   const resetMapToDefault = () => {
@@ -1640,8 +1722,31 @@
     applyDebugState(settingsDebugToggle.checked);
   });
 
-  settingsButton?.addEventListener("click", openSettings);
-  mapButton?.addEventListener("click", openMap);
+  settingsButton?.addEventListener("click", () => {
+    openSettings({ returnFocus: settingsButton });
+  });
+
+  mapButton?.addEventListener("click", () => {
+    openMap({ returnFocus: mapButton });
+  });
+
+  topMenuButton?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleTopMenu();
+  });
+
+  topToolsMenu?.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  topMenuSettingsButton?.addEventListener("click", () => {
+    openSettings({ returnFocus: topMenuButton });
+  });
+
+  topMenuMapButton?.addEventListener("click", () => {
+    openMap({ returnFocus: topMenuButton });
+  });
+
   mapCloseButton?.addEventListener("click", closeMap);
   mapResetButton?.addEventListener("click", resetMapToDefault);
   mapSaveButton?.addEventListener("click", saveMapToServer);
@@ -1658,6 +1763,19 @@
     if (event.target === mapOverlay) closeMap();
   });
 
+  document.addEventListener("click", (event) => {
+    if (!isTopMenuOpen()) return;
+    if (event.target instanceof Node && topToolsMenu?.contains(event.target)) return;
+    if (event.target instanceof Node && topMenuButton?.contains(event.target)) return;
+    closeTopMenu();
+  });
+
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 820 && isTopMenuOpen()) {
+      closeTopMenu();
+    }
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     if (!mapOverlay?.classList.contains("settings-hidden")) {
@@ -1666,6 +1784,10 @@
     }
     if (!settingsOverlay?.classList.contains("settings-hidden")) {
       closeSettings();
+      return;
+    }
+    if (isTopMenuOpen()) {
+      closeTopMenu({ restoreFocus: true });
     }
   });
 
