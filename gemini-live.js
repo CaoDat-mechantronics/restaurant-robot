@@ -98,7 +98,9 @@ QUY TẮC NHẬN BIẾT ROBOT VÀ CÔNG VIỆC HIỆN TẠI:
 
 1. Khi người dùng hỏi về chính robot hiện tại, ví dụ: "em đang làm gì", "em đang đi đâu", "đang giao món gì", "đi bàn nào", "đã tới bàn chưa", "nhiệm vụ hiện tại là gì", "em có đang rảnh không", LUÔN gọi function read_robot_context trước khi trả lời. Không suy đoán từ hội thoại cũ.
 
-2. read_robot_context là nguồn sự thật của frontend về robot đang được chọn. Phải dùng robot_number, alive, status và tasks mà tool trả về.
+2. read_robot_context là nguồn sự thật của frontend về robot đang được chọn. Phải dùng robot_number, alive, status, task_type và tasks mà tool trả về.
+
+2a. task_type cho biết LOẠI NHIỆM VỤ, còn status cho biết GIAI ĐOẠN THỰC HIỆN. Hiện nhiệm vụ giao món dùng task_type="food_delivery". Với dữ liệu task cũ chưa có task_type, coi là "food_delivery" để tương thích ngược; không được tự suy ra một loại nhiệm vụ khác.
 
 3. Diễn giải work status như sau:
    - available: trả lời rằng em đang sẵn sàng làm việc và hiện chưa có nhiệm vụ đang thực hiện.
@@ -426,7 +428,7 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
         );
 
         this.onDebug(
-          `Gemini voice=${window.APP_CONFIG.GEMINI_VOICE_NAME || "Erinome"} · Vietnamese/Hanoi style requested by system instruction`
+          `Gemini voice=${window.APP_CONFIG.GEMINI_VOICE_NAME || "Aoede"} · Vietnamese/Hanoi style requested by system instruction`
         );
 
         const setupMessage = {
@@ -892,6 +894,19 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
           ? robot.tasks
           : null;
 
+      // task_type phân biệt loại nghiệp vụ của nhiệm vụ.
+      // Các task cũ trong database chưa có field này đều là task giao món,
+      // vì vậy fallback về food_delivery để không làm hỏng dữ liệu cũ.
+      const taskTypeRaw = String(
+        task?.task_type || ""
+      )
+        .trim()
+        .toLowerCase();
+
+      const taskType = task
+        ? (taskTypeRaw || "food_delivery")
+        : "";
+
       const foodName = String(
         task?.food_name || ""
       ).trim();
@@ -913,15 +928,24 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
         }
 
         if (status === "received_task") {
-          return `Đã nhận nhiệm vụ chuẩn bị giao ${foodPart} tới ${tablePart}, nhưng chưa bắt đầu chạy. Đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.`;
+          if (taskType === "food_delivery") {
+            return `Đã nhận nhiệm vụ chuẩn bị giao ${foodPart} tới ${tablePart}, nhưng chưa bắt đầu chạy. Đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.`;
+          }
+          return `Đã nhận nhiệm vụ loại ${taskType || "không xác định"} nhưng chưa bắt đầu chạy. Đang chờ lệnh BẮT ĐẦU từ giao diện để thực thi.`;
         }
 
         if (status === "on_task") {
-          return `Đang thực hiện nhiệm vụ giao ${foodPart} tới ${tablePart}.`;
+          if (taskType === "food_delivery") {
+            return `Đang thực hiện nhiệm vụ giao ${foodPart} tới ${tablePart}.`;
+          }
+          return `Đang thực hiện nhiệm vụ loại ${taskType || "không xác định"}.`;
         }
 
         if (status === "on_target") {
-          return `Đã đến ${tablePart} với ${foodPart} và đang chờ khách lấy món khỏi robot.`;
+          if (taskType === "food_delivery") {
+            return `Đã đến ${tablePart} với ${foodPart} và đang chờ khách lấy món khỏi robot.`;
+          }
+          return `Đã đến điểm đích của nhiệm vụ loại ${taskType || "không xác định"} và đang chờ hoàn tất tác vụ tại đích.`;
         }
 
         if (
@@ -946,6 +970,7 @@ QUY TẮC NGHIỆP VỤ BẮT BUỘC:
         robot_key: context.robot_key || `robot_${robotNumber}`,
         alive: String(context.alive || "disconnected").toLowerCase(),
         status,
+        task_type: taskType || null,
         work_summary: missionText,
         tasks: task,
         has_food_frontend: context.has_food_frontend ?? null,
