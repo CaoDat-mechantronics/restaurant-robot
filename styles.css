@@ -3031,3 +3031,115 @@ body.debug-mode-enabled #cameraSwitchButton {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* =========================================================
+   MAP CONFIGURATION
+   ========================================================= */
+
+.map-icon {
+  font-size: 17px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.map-panel {
+  width: min(470px, calc(100vw - 36px));
+}
+
+.map-content {
+  gap: 10px;
+}
+
+.map-legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.map-legend > span {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #07111f;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.map-legend b {
+  color: var(--text);
+}
+
+.map-table-list {
+  display: grid;
+  gap: 8px;
+}
+
+.map-table-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #10233a99;
+}
+
+.map-table-name {
+  min-width: 0;
+}
+
+.map-table-name b {
+  display: block;
+  font-size: 13px;
+}
+
+.map-table-name small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.map-line-select {
+  min-width: 112px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--text);
+  background: #07111f;
+  font: inherit;
+}
+
+.map-status,
+.map-empty {
+  padding: 9px 10px;
+  border: 1px dashed #35516e;
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.map-actions button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+@media (max-width: 480px) {
+  .map-panel {
+    width: 100%;
+  }
+
+  .map-legend {
+    grid-template-columns: 1fr;
+  }
+
+  .map-table-row {
+    padding: 9px 10px;
+  }
+}

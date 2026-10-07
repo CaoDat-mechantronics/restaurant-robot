@@ -53,6 +53,18 @@
         <span class="top-button-label">Cài đặt</span>
       </button>
 
+      <button
+        id="mapButton"
+        class="top-icon-button"
+        type="button"
+        title="Map"
+        aria-controls="mapPanel"
+        aria-expanded="false"
+      >
+        <span class="map-icon" aria-hidden="true">⌖</span>
+        <span class="top-button-label">Map</span>
+      </button>
+
       <label
         class="debug-switch top-debug-switch"
         title="Bật hoặc tắt giao diện debug"
@@ -617,6 +629,52 @@
 
 
 <!-- =====================================================
+     MAP CONFIGURATION
+     ===================================================== -->
+<div
+  id="mapOverlay"
+  class="settings-overlay settings-hidden"
+  aria-hidden="true"
+>
+  <section
+    id="mapPanel"
+    class="settings-panel map-panel"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="mapTitle"
+  >
+    <div class="settings-header">
+      <div>
+        <h2 id="mapTitle">Map bàn / Line</h2>
+        <p>Chọn Line cho từng bàn. Backend dùng cấu hình này để tính route.</p>
+      </div>
+      <button
+        id="mapCloseButton"
+        class="settings-close"
+        type="button"
+        aria-label="Đóng Map"
+      >×</button>
+    </div>
+
+    <div class="settings-content map-content">
+      <div class="map-legend">
+        <span><b>Line 1</b> · rẽ trái tại ngã rẽ</span>
+        <span><b>Line 2</b> · rẽ phải tại ngã rẽ</span>
+      </div>
+
+      <div id="mapTableList" class="map-table-list" aria-live="polite"></div>
+
+      <div id="mapStatus" class="map-status">Chưa tải cấu hình Map.</div>
+
+      <div class="settings-actions map-actions">
+        <button id="mapResetButton" type="button">Khôi phục mặc định</button>
+        <button id="mapSaveButton" type="button">Lưu Map</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- =====================================================
      SETTINGS
      ===================================================== -->
 <div
@@ -1029,6 +1087,14 @@
   const settingsUpdateServerButton = document.getElementById("settingsUpdateServerButton");
   const settingsSaveStorageButton = document.getElementById("settingsSaveStorageButton");
 
+  const mapButton = document.getElementById("mapButton");
+  const mapOverlay = document.getElementById("mapOverlay");
+  const mapCloseButton = document.getElementById("mapCloseButton");
+  const mapTableList = document.getElementById("mapTableList");
+  const mapStatus = document.getElementById("mapStatus");
+  const mapResetButton = document.getElementById("mapResetButton");
+  const mapSaveButton = document.getElementById("mapSaveButton");
+
   const settingsAdvancedButton = document.getElementById("settingsAdvancedButton");
   const advancedSettingsPanel = document.getElementById("advancedSettingsPanel");
   const settingsAdvancedBackButton = document.getElementById("settingsAdvancedBackButton");
@@ -1382,6 +1448,186 @@
     settingsButton?.focus();
   };
 
+  let editableMapTables = [];
+  let mapLoading = false;
+
+  const mapAuthHeaders = () => {
+    const token = localStorage.getItem("restaurant_access_token") || "";
+    return {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    };
+  };
+
+  const mapApi = async (path, options = {}) => {
+    const response = await fetch(
+      `${window.APP_CONFIG?.API_BASE_URL || ""}${path}`,
+      {
+        ...options,
+        headers: {
+          ...mapAuthHeaders(),
+          ...(options.headers || {})
+        }
+      }
+    );
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (_) {}
+
+    if (!response.ok) {
+      const detail = data?.detail || data?.message || `HTTP ${response.status}`;
+      throw new Error(String(detail));
+    }
+
+    return data || {};
+  };
+
+  const normalizeMapTables = (tables) => {
+    const rows = Array.isArray(tables) ? tables : [];
+    return rows
+      .map((row) => ({
+        table: Number(row?.table),
+        line: Number(row?.line) === 2 ? 2 : 1,
+        junction_turn: Number(row?.line) === 2 ? "RIGHT" : "LEFT",
+        junction_turn_vi: Number(row?.line) === 2 ? "Rẽ phải" : "Rẽ trái",
+        stop_index: Number(row?.stop_index) || 0
+      }))
+      .filter((row) => Number.isInteger(row.table) && row.table > 0)
+      .sort((a, b) => a.table - b.table);
+  };
+
+  const recalculateMapPreview = () => {
+    for (const line of [1, 2]) {
+      const lineRows = editableMapTables
+        .filter((row) => Number(row.line) === line)
+        .sort((a, b) => a.table - b.table);
+
+      lineRows.forEach((row, index) => {
+        row.stop_index = index + 1;
+        row.junction_turn = line === 1 ? "LEFT" : "RIGHT";
+        row.junction_turn_vi = line === 1 ? "Rẽ trái" : "Rẽ phải";
+      });
+    }
+  };
+
+  const renderMapTables = () => {
+    if (!mapTableList) return;
+    recalculateMapPreview();
+
+    if (!editableMapTables.length) {
+      mapTableList.innerHTML = '<div class="map-empty">Không có dữ liệu bàn.</div>';
+      return;
+    }
+
+    mapTableList.innerHTML = editableMapTables.map((row) => `
+      <div class="map-table-row" data-table="${row.table}">
+        <div class="map-table-name">
+          <b>Bàn ${row.table}</b>
+          <small>Điểm ${row.stop_index} · ${row.junction_turn_vi}</small>
+        </div>
+        <select class="map-line-select" data-table="${row.table}" aria-label="Line của bàn ${row.table}">
+          <option value="1" ${row.line === 1 ? "selected" : ""}>Line 1</option>
+          <option value="2" ${row.line === 2 ? "selected" : ""}>Line 2</option>
+        </select>
+      </div>
+    `).join("");
+
+    mapTableList.querySelectorAll(".map-line-select").forEach((select) => {
+      select.addEventListener("change", () => {
+        const table = Number(select.dataset.table);
+        const row = editableMapTables.find((item) => item.table === table);
+        if (!row) return;
+        row.line = Number(select.value) === 2 ? 2 : 1;
+        renderMapTables();
+        if (mapStatus) mapStatus.textContent = "Có thay đổi chưa lưu lên Server.";
+      });
+    });
+  };
+
+  const loadMapFromServer = async () => {
+    if (mapLoading) return;
+    mapLoading = true;
+    if (mapStatus) mapStatus.textContent = "Đang tải Map từ Server...";
+    if (mapSaveButton) mapSaveButton.disabled = true;
+
+    try {
+      const data = await mapApi("/robot-ai/map");
+      editableMapTables = normalizeMapTables(data?.tables);
+      renderMapTables();
+      if (mapStatus) {
+        mapStatus.textContent = data?.updated_at
+          ? `Đã tải Map. Cập nhật: ${data.updated_at}`
+          : "Đang dùng Map mặc định của hệ thống.";
+      }
+    } catch (error) {
+      if (mapStatus) mapStatus.textContent = `Không tải được Map: ${error?.message || error}`;
+    } finally {
+      mapLoading = false;
+      if (mapSaveButton) mapSaveButton.disabled = false;
+    }
+  };
+
+  const openMap = () => {
+    if (!mapOverlay) return;
+    mapOverlay.classList.remove("settings-hidden");
+    mapOverlay.setAttribute("aria-hidden", "false");
+    mapButton?.setAttribute("aria-expanded", "true");
+    requestAnimationFrame(() => mapCloseButton?.focus());
+    loadMapFromServer();
+  };
+
+  const closeMap = () => {
+    if (!mapOverlay) return;
+    mapOverlay.classList.add("settings-hidden");
+    mapOverlay.setAttribute("aria-hidden", "true");
+    mapButton?.setAttribute("aria-expanded", "false");
+    mapButton?.focus();
+  };
+
+  const resetMapToDefault = () => {
+    const totalTables = editableMapTables.length || 10;
+    editableMapTables = Array.from({ length: totalTables }, (_, index) => {
+      const table = index + 1;
+      return {
+        table,
+        line: table <= 5 ? 1 : 2,
+        junction_turn: table <= 5 ? "LEFT" : "RIGHT",
+        junction_turn_vi: table <= 5 ? "Rẽ trái" : "Rẽ phải",
+        stop_index: table <= 5 ? table : table - 5
+      };
+    });
+    renderMapTables();
+    if (mapStatus) mapStatus.textContent = "Đã khôi phục mặc định trên giao diện. Bấm Lưu Map để cập nhật Server.";
+  };
+
+  const saveMapToServer = async () => {
+    if (!editableMapTables.length) return;
+    recalculateMapPreview();
+    if (mapSaveButton) mapSaveButton.disabled = true;
+    if (mapStatus) mapStatus.textContent = "Đang lưu Map lên Server...";
+
+    try {
+      const data = await mapApi("/robot-ai/map", {
+        method: "PUT",
+        body: JSON.stringify({
+          tables: editableMapTables.map((row) => ({
+            table: row.table,
+            line: row.line
+          }))
+        })
+      });
+      editableMapTables = normalizeMapTables(data?.tables);
+      renderMapTables();
+      if (mapStatus) mapStatus.textContent = "Đã lưu Map lên Server. Các task tạo sau thời điểm này sẽ dùng Map mới.";
+    } catch (error) {
+      if (mapStatus) mapStatus.textContent = `Không lưu được Map: ${error?.message || error}`;
+    } finally {
+      if (mapSaveButton) mapSaveButton.disabled = false;
+    }
+  };
+
   applyDebugState(readDebugState(), false);
   syncQrAreaDefaultToStorage();
   applyStoredSettings();
@@ -1395,6 +1641,10 @@
   });
 
   settingsButton?.addEventListener("click", openSettings);
+  mapButton?.addEventListener("click", openMap);
+  mapCloseButton?.addEventListener("click", closeMap);
+  mapResetButton?.addEventListener("click", resetMapToDefault);
+  mapSaveButton?.addEventListener("click", saveMapToServer);
   settingsCloseButton?.addEventListener("click", closeSettings);
   settingsAdvancedCloseButton?.addEventListener("click", closeSettings);
   settingsAdvancedButton?.addEventListener("click", showAdvancedSettings);
@@ -1404,8 +1654,17 @@
     if (event.target === settingsOverlay) closeSettings();
   });
 
+  mapOverlay?.addEventListener("click", (event) => {
+    if (event.target === mapOverlay) closeMap();
+  });
+
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !settingsOverlay?.classList.contains("settings-hidden")) {
+    if (event.key !== "Escape") return;
+    if (!mapOverlay?.classList.contains("settings-hidden")) {
+      closeMap();
+      return;
+    }
+    if (!settingsOverlay?.classList.contains("settings-hidden")) {
       closeSettings();
     }
   });
