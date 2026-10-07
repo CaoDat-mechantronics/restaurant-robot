@@ -893,7 +893,7 @@
         "Robot đang RECEIVED TASK."
       );
       requestRobotSpeech(
-        "Vâng ạ, em đã sẵn sàng. Hãy bấm Bắt đầu hoặc ra lệnh giao món đi ạ.",
+        "Thưa quản lý, em đã sẵn sàng. Quản lý hãy bấm Bắt đầu hoặc ra lệnh giao món đi ạ.",
         "replacement_ready",
         false
       );
