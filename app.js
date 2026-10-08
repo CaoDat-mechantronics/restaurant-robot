@@ -872,7 +872,7 @@
       // Nút Nhận lệnh không tự phát câu chào này.
       if (source === "wake") {
         await live.sendText(
-          'Bạn vừa được gọi bằng câu "nhân viên phục vụ". Hãy chỉ đáp đúng một câu: "Dạ có em ạ." Sau đó tiếp tục lắng nghe người dùng.',
+          'Bạn vừa được gọi bằng câu "nhân viên phục vụ". Hãy chỉ đáp đúng một câu: "Dạ em đây ạ." Sau đó tiếp tục lắng nghe người dùng.',
           {
             showTranscript: false
           }
@@ -1928,6 +1928,19 @@
       state.live?.stopMic();
     } catch (_) {}
     resumeWakeRecognition();
+  });
+
+  // Đóng hẳn Gemini Live khi robot bắt đầu di chuyển. Wake phrase local vẫn
+  // được bật lại ngay sau đó, vì vậy ở BẤT KỲ work status nào người dùng vẫn
+  // có thể gọi "nhân viên phục vụ" để mở một phiên Live mới.
+  window.addEventListener("robot:close-gemini-session", () => {
+    try {
+      state.live?.close();
+    } catch (_) {}
+
+    setMode("closed");
+    resumeWakeRecognition();
+    log("GEMINI session closed by robot navigation; wake phrase remains active");
   });
 
   // =====================================================

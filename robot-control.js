@@ -1104,13 +1104,18 @@
   // =========================================================
   // LUỒNG NHIỆM VỤ CHÍNH THỨC
   //
-  // BẮT ĐẦU:
-  //   - mở camera sau
-  //   - gửi "3" để ESP32 bám line
-  //   - nếu gặp QR nga_re: STOP -> quay trái/phải 1/2 theo route + turnAngle
+  // BẮT ĐẦU / CHIỀU ĐI:
+  //   - nói "Em đi ngay đây ạ." rồi đóng hẳn Gemini Live
+  //   - local wake phrase vẫn chạy để có thể gọi lại Gemini ở mọi trạng thái
+  //   - mở camera sau, gửi "3" để ESP32 bám line
+  //   - gặp QR nga_re: STOP -> quay trái/phải 1/2 theo route + turnAngle
   //   - đạt góc: STOP -> gửi lại "3"
   //   - QR chỉ kích hoạt hành động khi areaPercent >= QR_ACTION_MIN_AREA_PERCENT
   //   - gặp QR ban_<table>: STOP -> quay đầu bằng uTurnAngle theo hướng ngược hướng rẽ -> STOP
+  // CHIỀU VỀ ON_HOME:
+  //   - bỏ qua nga_re
+  //   - waiting_station_right = QR ngã rẽ chiều về
+  //   - waiting_station = QR đích cuối ở vị trí chờ
   // =========================================================
 
   // Snapshot tạm của nhiệm vụ được lấy trực tiếp từ backend khi bấm BẮT ĐẦU.
@@ -1205,7 +1210,8 @@
     task: null,
     targetTable: 0,
     targetTableQr: "",
-    waitingStationQr: "waiting_station_left",
+    returnJunctionQr: "waiting_station_right",
+    waitingStationQr: "waiting_station",
     turnDirection: null,
     turnAngle: 90,
     uTurnAngle: 180,
@@ -1381,7 +1387,8 @@
     officialRouteSession.task = null;
     officialRouteSession.targetTable = 0;
     officialRouteSession.targetTableQr = "";
-    officialRouteSession.waitingStationQr = "waiting_station_left";
+    officialRouteSession.returnJunctionQr = "waiting_station_right";
+    officialRouteSession.waitingStationQr = "waiting_station";
     officialRouteSession.turnDirection = null;
     officialRouteSession.turnAngle = 90;
     officialRouteSession.uTurnAngle = 180;
@@ -1421,6 +1428,42 @@
         }
       })
     );
+  }
+
+
+  function requestRobotSpeechAndWait(text, tag, listen = false, timeoutMs = 12000) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+
+      const cleanup = () => {
+        window.removeEventListener("robot:speech-complete", onComplete);
+        window.removeEventListener("robot:speech-failed", onFailed);
+        if (timer) clearTimeout(timer);
+      };
+
+      const finish = (spoken, reason = "") => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve({ spoken: Boolean(spoken), reason: String(reason || "") });
+      };
+
+      const onComplete = (event) => {
+        if (String(event?.detail?.tag || "") !== String(tag || "")) return;
+        finish(true, "complete");
+      };
+
+      const onFailed = (event) => {
+        if (String(event?.detail?.tag || "") !== String(tag || "")) return;
+        finish(false, event?.detail?.error || "speech_failed");
+      };
+
+      window.addEventListener("robot:speech-complete", onComplete);
+      window.addEventListener("robot:speech-failed", onFailed);
+      timer = window.setTimeout(() => finish(false, "timeout"), Math.max(1000, Number(timeoutMs) || 12000));
+      requestRobotSpeech(text, tag, listen);
+    });
   }
 
   async function updateOfficialWorkStatus(status) {
@@ -1556,8 +1599,12 @@
       : originalDirection;
     const targetAngle = officialRouteSession.turnAngle;
 
+    const junctionQr = officialRouteSession.mode === "home"
+      ? officialRouteSession.returnJunctionQr
+      : "nga_re";
+
     if (!direction) {
-      setMessage("Đã gặp QR nga_re nhưng task thiếu hướng rẽ. Robot giữ STOP.", true);
+      setMessage(`Đã gặp QR ${junctionQr} nhưng task thiếu hướng rẽ. Robot giữ STOP.`, true);
       try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
       return;
     }
@@ -1567,7 +1614,7 @@
     try {
       await publishStatusCommandAsync(DEBUG_COMMAND.STOP);
       setMessage(
-        `Đã thấy nga_re. Chuẩn bị quay ${direction === "LEFT" ? "trái" : "phải"} ${targetAngle}° ` +
+        `Đã thấy ${junctionQr}. Chuẩn bị quay ${direction === "LEFT" ? "trái" : "phải"} ${targetAngle}° ` +
         `(${officialRouteSession.mode === "home" ? "chiều về" : "chiều đi"}).`
       );
 
@@ -1716,10 +1763,11 @@
     officialRouteSession.supportPhase = "starting_home";
     clearOfficialSupportTimer();
 
-    // Lời chào tại bàn đã phát xong. Tắt mic Live khi robot bắt đầu chạy về
-    // để tránh tiếng động cơ/nhà hàng tạo thêm turn ngoài ý muốn. Wake phrase
-    // được app bật lại nên quản lý vẫn có thể gọi robot khi cần.
-    window.dispatchEvent(new CustomEvent("robot:stop-gemini-mic"));
+    // Lời chào tại bàn đã phát xong. Đóng HẲN Gemini Live khi robot bắt đầu
+    // chạy về để tránh tiếng động cơ/nhà hàng tạo thêm turn và tiết kiệm phiên.
+    // Wake phrase local vẫn được app bật lại, nên ở ON HOME người dùng vẫn có
+    // thể gọi "nhân viên phục vụ" để mở lại Gemini bất kỳ lúc nào.
+    window.dispatchEvent(new CustomEvent("robot:close-gemini-session"));
 
     try {
       await updateOfficialWorkStatus("on_home");
@@ -1735,7 +1783,7 @@
       officialRouteSession.supportPhase = "home";
       setOfficialStartButtonState(true, "Đang trở về vị trí chờ");
       setMessage(
-        `Robot đang ON HOME, bám line trở về. Chờ QR nga_re rồi ${officialRouteSession.waitingStationQr}.`
+        `Robot đang ON HOME, bám line trở về. Chờ QR ${officialRouteSession.returnJunctionQr} rồi ${officialRouteSession.waitingStationQr}.`
       );
     } catch (error) {
       try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
@@ -1913,6 +1961,7 @@
     if (!Number.isFinite(areaPercent) || areaPercent < minAreaPercent) {
       if (
         text === "nga_re" ||
+        text === officialRouteSession.returnJunctionQr ||
         text === officialRouteSession.targetTableQr ||
         text === officialRouteSession.waitingStationQr
       ) {
@@ -1964,14 +2013,26 @@
         text === officialRouteSession.waitingStationQr &&
         officialRouteSession.junctionHandled === false
       ) {
-        log(`OFFICIAL QR WAITING STATION IGNORE before return junction`);
+        log(`OFFICIAL QR WAITING STATION IGNORE before ${officialRouteSession.returnJunctionQr}`);
         return true;
       }
 
-      if (text === "nga_re" && officialRouteSession.junctionHandled === false) {
+      if (
+        text === officialRouteSession.returnJunctionQr &&
+        officialRouteSession.junctionHandled === false
+      ) {
         officialRouteSession.junctionHandled = true;
-        log(`OFFICIAL QR JUNCTION HOME ACCEPT area=${areaPercent.toFixed(2)}%`);
+        log(
+          `OFFICIAL QR RETURN JUNCTION ACCEPT text=${text} area=${areaPercent.toFixed(2)}%`
+        );
         void runOfficialJunctionTurn();
+        return true;
+      }
+
+      // nga_re chỉ dành cho chiều đi ON_TASK. Khi ON_HOME, dù QR đủ lớn cũng
+      // bỏ qua để không bị trùng logic điều hướng giữa hai chiều.
+      if (text === "nga_re") {
+        log(`OFFICIAL QR nga_re IGNORE in ON_HOME area=${areaPercent.toFixed(2)}%`);
         return true;
       }
     }
@@ -1979,7 +2040,7 @@
     return true;
   }
 
-  async function startOfficialRoute() {
+  async function startOfficialRoute({ departureAlreadySpoken = false } = {}) {
     if (officialRouteSession.active) {
       return;
     }
@@ -2053,9 +2114,33 @@
     officialRouteSession.foodTakenAtTargetPending = false;
 
     const sessionToken = officialRouteSession.token;
-    setOfficialStartButtonState(true, "Đang mở camera sau");
+    setOfficialStartButtonState(true, departureAlreadySpoken ? "Đang mở camera sau" : "Đang báo bắt đầu");
 
     try {
+      // Nút BẮT ĐẦU không có turn thoại hiện hữu, nên frontend tự yêu cầu
+      // Gemini nói câu này và CHỜ phát xong. Với lệnh giọng nói "giao món đi",
+      // chính tool-response đã nói câu này trước khi gọi startOfficialRoute.
+      if (!departureAlreadySpoken) {
+        const speech = await requestRobotSpeechAndWait(
+          "Em đi ngay đây ạ.",
+          "delivery_departure",
+          false,
+          12000
+        );
+        if (!speech.spoken) {
+          log(`DEPARTURE SPEECH not confirmed: ${speech.reason || "unknown"}`);
+        }
+      }
+
+      if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) return;
+
+      // Sau câu "Em đi ngay đây ạ." phải đóng hẳn Gemini trước khi robot chạy.
+      // App sẽ lập tức bật lại local wake phrase, vì vậy vẫn có thể gọi
+      // "nhân viên phục vụ" trong ON_TASK để mở lại Gemini khi cần.
+      window.dispatchEvent(new CustomEvent("robot:close-gemini-session"));
+      await new Promise((resolve) => setTimeout(resolve, 80));
+
+      setOfficialStartButtonState(true, "Đang mở camera sau");
       await ensureRearCameraRunning();
       if (!officialRouteSession.active || sessionToken !== officialRouteSession.token) return;
 
@@ -2098,6 +2183,10 @@
   window.addEventListener("robot:speech-complete", (event) => {
     const tag = String(event?.detail?.tag || "");
 
+    if (tag === "delivery_departure") {
+      return;
+    }
+
     if (tag === "arrived_target") {
       if (officialRouteSession.supportPhase === "arrival_announcement") {
         officialRouteSession.supportPhase = "idle";
@@ -2126,6 +2215,9 @@
 
   window.addEventListener("robot:speech-failed", (event) => {
     const tag = String(event?.detail?.tag || "");
+    if (tag === "delivery_departure") {
+      return;
+    }
     // Không để lỗi Gemini làm robot kẹt vĩnh viễn ở bàn/station.
     if (tag === "arrived_target") {
       officialRouteSession.supportPhase = "idle";
@@ -2168,9 +2260,19 @@
     }
   });
 
+  let voiceDeliveryStartPending = false;
+
   window.addEventListener("robot:gemini-turn-complete", (event) => {
     const tag = String(event?.detail?.tag || "");
     if (tag) return;
+
+    // Với lệnh giọng nói "giao món đi", start_delivery đã buộc Gemini nói đúng
+    // "Em đi ngay đây ạ.". Chỉ sau khi turn này kết thúc mới đóng Live và chạy.
+    if (voiceDeliveryStartPending) {
+      voiceDeliveryStartPending = false;
+      void startOfficialRoute({ departureAlreadySpoken: true });
+      return;
+    }
 
     if (
       officialRouteSession.active &&
@@ -2204,7 +2306,10 @@
   });
 
   window.addEventListener("robot:start-delivery-request", () => {
-    void startOfficialRoute();
+    // Tool start_delivery đang ở giữa một turn của Gemini. Đợi Gemini nói đúng
+    // "Em đi ngay đây ạ." và nhận turnComplete rồi mới bắt đầu điều hướng.
+    voiceDeliveryStartPending = true;
+    setMessage("Đã nhận lệnh bằng giọng nói. Đang chờ câu xác nhận bắt đầu...");
   });
 
   window.addEventListener("robot:prepare-task-replacement", (event) => {
