@@ -1223,7 +1223,9 @@
     angleTurned: 0,
     turnTimer: null,
     supportTimer: null,
+    supportFinishFallbackTimer: null,
     supportPhase: "idle",
+    returnHomeStarted: false,
     foodRemovedDuringArrival: false,
     foodTakenAtTargetPending: false,
     finalizing: false
@@ -1377,9 +1379,32 @@
     }
   }
 
+  function clearOfficialSupportFinishFallbackTimer() {
+    if (officialRouteSession.supportFinishFallbackTimer) {
+      clearTimeout(officialRouteSession.supportFinishFallbackTimer);
+      officialRouteSession.supportFinishFallbackTimer = null;
+    }
+  }
+
+  function scheduleOfficialSupportFinishFallback(reason = "no_more_help", delayMs = 2500) {
+    clearOfficialSupportFinishFallbackTimer();
+    officialRouteSession.supportFinishFallbackTimer = window.setTimeout(() => {
+      officialRouteSession.supportFinishFallbackTimer = null;
+      if (
+        officialRouteSession.active &&
+        controlState.robotStatus === "on_target" &&
+        officialRouteSession.supportPhase === "finish_requested"
+      ) {
+        log(`TABLE SUPPORT FINISH FALLBACK reason=${reason}`);
+        void endTableSupport(`${reason}_fallback`);
+      }
+    }, Math.max(500, Number(delayMs) || 2500));
+  }
+
   function resetOfficialRouteSession({ keepButtonMessage = false } = {}) {
     clearOfficialTurnTimer();
     clearOfficialSupportTimer();
+    clearOfficialSupportFinishFallbackTimer();
     officialRouteSession.active = false;
     officialRouteSession.mode = "outbound";
     officialRouteSession.phase = "idle";
@@ -1399,6 +1424,7 @@
     officialRouteSession.previousYaw = null;
     officialRouteSession.angleTurned = 0;
     officialRouteSession.supportPhase = "idle";
+    officialRouteSession.returnHomeStarted = false;
     officialRouteSession.foodRemovedDuringArrival = false;
     officialRouteSession.foodTakenAtTargetPending = false;
     officialRouteSession.finalizing = false;
@@ -1711,6 +1737,7 @@
 
   function startTableSupportTimer() {
     clearOfficialSupportTimer();
+    clearOfficialSupportFinishFallbackTimer();
     if (
       !officialRouteSession.active ||
       controlState.robotStatus !== "on_target"
@@ -1719,9 +1746,10 @@
     officialRouteSession.supportPhase = "waiting_customer";
     officialRouteSession.supportTimer = window.setTimeout(() => {
       officialRouteSession.supportTimer = null;
-      void endTableSupport("timeout_10s");
-    }, 10000);
-    setMessage("Khách đã lấy món. Đang chờ yêu cầu hỗ trợ thêm trong 10 giây...");
+      log("TABLE SUPPORT TIMEOUT 15s: không có thêm lời nói từ khách");
+      void endTableSupport("timeout_15s");
+    }, 15000);
+    setMessage("Khách đã lấy món. Đang chờ yêu cầu hỗ trợ thêm trong 15 giây...");
   }
 
   async function handleFoodTakenAtTarget() {
@@ -1747,21 +1775,40 @@
     ) return;
 
     clearOfficialSupportTimer();
+    clearOfficialSupportFinishFallbackTimer();
     officialRouteSession.supportPhase = "farewell";
     log(`TABLE SUPPORT END reason=${reason}`);
-    requestRobotSpeech(
-      "Nếu quý khách không có yêu cầu hỗ trợ gì thêm, em xin phép, chúc quý khách ngon miệng ạ.",
+    setMessage("Đang cảm ơn quý khách trước khi robot trở về...");
+
+    // Không phụ thuộc tuyệt đối vào một event Gemini riêng lẻ nữa.
+    // Dù speech hoàn tất, speech lỗi hay quá timeout, hàm này vẫn đi tiếp
+    // tới beginReturnHome() để tránh robot kẹt ở ON TARGET.
+    const speechResult = await requestRobotSpeechAndWait(
+      "Cảm ơn quý khách ạ. Nếu quý khách không có yêu cầu hỗ trợ gì thêm, em xin phép. Chúc quý khách ngon miệng ạ.",
       "table_support_farewell",
-      false
+      false,
+      12000
     );
+    log(
+      `TABLE SUPPORT FAREWELL DONE spoken=${speechResult.spoken ? 1 : 0} ` +
+      `reason=${speechResult.reason || "unknown"}`
+    );
+
+    // Bắt buộc đi vào luồng trở về sau lời cảm ơn (hoặc sau fallback speech).
+    await beginReturnHome();
   }
 
   async function beginReturnHome() {
     if (!officialRouteSession.active) return;
     if (controlState.robotStatus !== "on_target") return;
+    if (officialRouteSession.returnHomeStarted) return;
 
+    // Khoá ngay từ đầu để tránh speech-complete / tool / fallback cùng gọi lặp.
+    officialRouteSession.returnHomeStarted = true;
     officialRouteSession.supportPhase = "starting_home";
     clearOfficialSupportTimer();
+    clearOfficialSupportFinishFallbackTimer();
+    log("RETURN HOME: bắt đầu chuyển ON_TARGET -> ON_HOME");
 
     // Lời chào tại bàn đã phát xong. Đóng HẲN Gemini Live khi robot bắt đầu
     // chạy về để tránh tiếng động cơ/nhà hàng tạo thêm turn và tiết kiệm phiên.
@@ -1771,13 +1818,16 @@
 
     try {
       await updateOfficialWorkStatus("on_home");
+      log("RETURN HOME: backend status = on_home");
       officialRouteSession.mode = "home";
       officialRouteSession.phase = "starting_home";
       officialRouteSession.junctionHandled = false;
       officialRouteSession.waitingStationHandled = false;
 
       await ensureRearCameraRunning();
+      log('RETURN HOME: publish topic/status = "3" (LINE_FOLLOW)');
       await publishStatusCommandAsync(DEBUG_COMMAND.LINE_FOLLOW);
+      log('RETURN HOME: topic/status = "3" publish OK');
 
       officialRouteSession.phase = "line_follow";
       officialRouteSession.supportPhase = "home";
@@ -1787,8 +1837,10 @@
       );
     } catch (error) {
       try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
+      officialRouteSession.returnHomeStarted = false;
       officialRouteSession.phase = "error";
       setMessage(`Không thể bắt đầu hành trình trở về: ${error.message}`, true);
+      log(`RETURN HOME ERROR: ${error.message}`);
     }
   }
 
@@ -2205,7 +2257,7 @@
       return;
     }
     if (tag === "table_support_farewell") {
-      void beginReturnHome();
+      // endTableSupport() đang tự chờ event này và tự gọi beginReturnHome().
       return;
     }
     if (tag === "delivery_complete_manager") {
@@ -2231,7 +2283,7 @@
     } else if (tag === "table_support_invite") {
       startTableSupportTimer();
     } else if (tag === "table_support_farewell") {
-      void beginReturnHome();
+      // endTableSupport() tự xử lý cả speech-failed/timeout rồi bắt đầu trở về.
     } else if (tag === "delivery_complete_manager") {
       void finalizeCompletedDelivery();
     }
@@ -2249,7 +2301,11 @@
     if (isNoMoreHelpText(text)) {
       clearOfficialSupportTimer();
       officialRouteSession.supportPhase = "finish_requested";
-      setMessage("Khách không cần hỗ trợ thêm. Đang kết thúc lượt hội thoại tại bàn...");
+      setMessage("Khách không cần hỗ trợ thêm. Đang cảm ơn và chuẩn bị trở về...");
+
+      // Bình thường chờ turn hiện tại của Gemini kết thúc để tránh hai audio chồng nhau.
+      // Nếu turnComplete không tới, fallback 2.5s vẫn kết thúc hỗ trợ chắc chắn.
+      scheduleOfficialSupportFinishFallback("no_more_help", 2500);
       return;
     }
 
@@ -2279,7 +2335,8 @@
       controlState.robotStatus === "on_target" &&
       officialRouteSession.supportPhase === "finish_requested"
     ) {
-      void endTableSupport("gemini_tool");
+      clearOfficialSupportFinishFallbackTimer();
+      void endTableSupport("gemini_turn_complete");
       return;
     }
 
@@ -2302,6 +2359,7 @@
       // tag turnComplete của tool bị nhầm với tag của câu farewell.
       clearOfficialSupportTimer();
       officialRouteSession.supportPhase = "finish_requested";
+      scheduleOfficialSupportFinishFallback("finish_table_support_tool", 2500);
     }
   });
 
