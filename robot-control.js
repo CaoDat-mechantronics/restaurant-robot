@@ -1114,7 +1114,9 @@
   //   - gặp QR ban_<table>: STOP -> quay đầu bằng uTurnAngle theo hướng ngược hướng rẽ -> STOP
   // CHIỀU VỀ ON_HOME:
   //   - bỏ qua nga_re
-  //   - waiting_station_right = QR ngã rẽ chiều về
+  //   - nếu task.junction_turn = LEFT: chỉ nhận waiting_station_left và rẽ PHẢI
+  //   - nếu task.junction_turn = RIGHT: chỉ nhận waiting_station_right và rẽ TRÁI
+  //   - QR waiting_station_left/right không khớp route sẽ bị bỏ qua
   //   - waiting_station = QR đích cuối ở vị trí chờ
   // =========================================================
 
@@ -1210,7 +1212,7 @@
     task: null,
     targetTable: 0,
     targetTableQr: "",
-    returnJunctionQr: "waiting_station_right",
+    returnJunctionQr: "",
     waitingStationQr: "waiting_station",
     turnDirection: null,
     turnAngle: 90,
@@ -1249,6 +1251,18 @@
       : direction === "RIGHT"
         ? "LEFT"
         : null;
+  }
+
+  function getReturnJunctionQr(direction) {
+    if (direction === "LEFT") return "waiting_station_left";
+    if (direction === "RIGHT") return "waiting_station_right";
+    return "";
+  }
+
+  function getIgnoredReturnJunctionQr(direction) {
+    if (direction === "LEFT") return "waiting_station_right";
+    if (direction === "RIGHT") return "waiting_station_left";
+    return "";
   }
 
   function readOfficialTurnAngle() {
@@ -1412,7 +1426,7 @@
     officialRouteSession.task = null;
     officialRouteSession.targetTable = 0;
     officialRouteSession.targetTableQr = "";
-    officialRouteSession.returnJunctionQr = "waiting_station_right";
+    officialRouteSession.returnJunctionQr = "";
     officialRouteSession.waitingStationQr = "waiting_station";
     officialRouteSession.turnDirection = null;
     officialRouteSession.turnAngle = 90;
@@ -1823,6 +1837,13 @@
       officialRouteSession.phase = "starting_home";
       officialRouteSession.junctionHandled = false;
       officialRouteSession.waitingStationHandled = false;
+      officialRouteSession.returnJunctionQr = getReturnJunctionQr(
+        officialRouteSession.turnDirection
+      );
+
+      if (!officialRouteSession.returnJunctionQr) {
+        throw new Error("Task thiếu junction_turn để xác định QR rẽ chiều về.");
+      }
 
       await ensureRearCameraRunning();
       log('RETURN HOME: publish topic/status = "3" (LINE_FOLLOW)');
@@ -2013,7 +2034,8 @@
     if (!Number.isFinite(areaPercent) || areaPercent < minAreaPercent) {
       if (
         text === "nga_re" ||
-        text === officialRouteSession.returnJunctionQr ||
+        text === "waiting_station_left" ||
+        text === "waiting_station_right" ||
         text === officialRouteSession.targetTableQr ||
         text === officialRouteSession.waitingStationQr
       ) {
@@ -2052,6 +2074,10 @@
     }
 
     if (officialRouteSession.mode === "home") {
+      const ignoredReturnJunctionQr = getIgnoredReturnJunctionQr(
+        officialRouteSession.turnDirection
+      );
+
       if (
         text === officialRouteSession.waitingStationQr &&
         officialRouteSession.junctionHandled === true
@@ -2069,15 +2095,41 @@
         return true;
       }
 
+      // QR chiều về phải khớp với nhánh đã đi lúc ON_TASK:
+      // - task LEFT  -> nhận waiting_station_left, bỏ waiting_station_right, rồi rẽ RIGHT.
+      // - task RIGHT -> nhận waiting_station_right, bỏ waiting_station_left, rồi rẽ LEFT.
+      if (
+        ignoredReturnJunctionQr &&
+        text === ignoredReturnJunctionQr &&
+        officialRouteSession.junctionHandled === false
+      ) {
+        log(
+          `OFFICIAL QR RETURN JUNCTION IGNORE text=${text} expected=${officialRouteSession.returnJunctionQr}`
+        );
+        return true;
+      }
+
       if (
         text === officialRouteSession.returnJunctionQr &&
         officialRouteSession.junctionHandled === false
       ) {
         officialRouteSession.junctionHandled = true;
         log(
-          `OFFICIAL QR RETURN JUNCTION ACCEPT text=${text} area=${areaPercent.toFixed(2)}%`
+          `OFFICIAL QR RETURN JUNCTION ACCEPT text=${text} area=${areaPercent.toFixed(2)}% ` +
+          `task_turn=${officialRouteSession.turnDirection} ` +
+          `return_turn=${oppositeDirection(officialRouteSession.turnDirection)}`
         );
         void runOfficialJunctionTurn();
+        return true;
+      }
+
+      // Sau khi đã xử lý đúng QR rẽ chiều về, cả hai QR nhánh đều bị bỏ qua
+      // để không thể kích hoạt lần rẽ thứ hai.
+      if (
+        officialRouteSession.junctionHandled === true &&
+        (text === "waiting_station_left" || text === "waiting_station_right")
+      ) {
+        log(`OFFICIAL QR RETURN JUNCTION IGNORE already handled text=${text}`);
         return true;
       }
 
@@ -2156,6 +2208,7 @@
     officialRouteSession.targetTable = routeInfo.table;
     officialRouteSession.targetTableQr = `ban_${routeInfo.table}`;
     officialRouteSession.turnDirection = routeInfo.turnDirection;
+    officialRouteSession.returnJunctionQr = getReturnJunctionQr(routeInfo.turnDirection);
     officialRouteSession.turnAngle = routeInfo.turnAngle;
     officialRouteSession.uTurnAngle = routeInfo.uTurnAngle;
     officialRouteSession.junctionHandled = false;
