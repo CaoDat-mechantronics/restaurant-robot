@@ -200,6 +200,10 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
 
 1. Với MỌI yêu cầu giao/mang món tới bàn, trước hết LUÔN gọi read_robot_context để đọc status và task thật của robot. Không nhận task mới chỉ dựa vào nội dung hội thoại.
 
+1a. FRESH CHECK BẮT BUỘC: MỖI yêu cầu giao món mới có đủ tên món + số bàn phải gọi check_table_food MỚI trong chính lượt yêu cầu đó TRƯỚC KHI phát ra bất kỳ kết luận nào rằng bàn có/không có món, món giao được/không giao được, hoặc trước khi hỏi xác nhận. Không được dùng trí nhớ hội thoại, kết quả check cũ, read_table_info hay suy đoán thay cho check_table_food. Nếu chưa gọi check_table_food cho đúng food_name + table_number hiện tại thì KHÔNG được nói "bàn không có món", "có món", "đã sẵn sàng" hay kết luận tương tự; hành động tiếp theo bắt buộc phải là gọi tool check_table_food.
+
+1b. Nếu người dùng lặp lại cùng một yêu cầu giao món ở một lượt mới, vẫn gọi check_table_food lại vì trạng thái món có thể đã thay đổi trong database. Khi tool trả found/deliverable/message, trả lời đúng dữ liệu mới nhất đó; không thay thế bằng thông tin đã nhớ từ lượt trước.
+
 2. Nếu status=abnormal_behavior: KHÔNG nhận task; xưng "tôi", gọi "quản lý" và nói theo ý: "Thưa quản lý, tôi đang gặp vấn đề trong quá trình hoạt động. Vui lòng kiểm tra robot ạ."
 
 3. Nếu status=on_task, on_target, on_home, come_home hoặc come_back: KHÔNG nhận task mới. Đọc tasks và nói theo ý: "Em đang bận giao món {x} tới bàn {y}, em sẽ trở lại ngay ạ."
@@ -239,8 +243,8 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
   // GEMINI TOOLS
   // =========================================================
 
-  tools() {
-    return [
+  tools(modelName = "") {
+    const toolList = [
       {
         functionDeclarations: [
           {
@@ -295,7 +299,7 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
           {
             name: "check_table_food",
             description:
-              "Kiểm tra trong dữ liệu nhà hàng xem một bàn có món người quản lý yêu cầu hay không. Phải gọi trước khi nhận nhiệm vụ giao món.",
+              "FRESH CHECK bắt buộc qua API backend cho đúng bàn + món hiện tại. Mỗi yêu cầu giao món mới phải gọi tool này lại trước khi nói bàn có/không có món hoặc món có giao được hay không; không được dùng kết quả cũ.",
             parameters: {
               type: "OBJECT",
               properties: {
@@ -379,6 +383,22 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
         ]
       }
     ];
+
+    // Gemini 3.8 Live mặc định dùng function calling bất đồng bộ.
+    // Luồng nghiệp vụ giao món của robot cần tool chạy tuần tự để không nói
+    // trước khi check API xong, nên khi đổi sang đúng gemini-3.8-live ta ép
+    // BLOCKING. Không áp dụng cho bản extended-thinking vì model đó chỉ hỗ
+    // trợ NON_BLOCKING.
+    const normalizedModel = String(modelName || "").trim().toLowerCase();
+    if (normalizedModel === "gemini-3.8-live") {
+      for (const toolGroup of toolList) {
+        for (const declaration of toolGroup.functionDeclarations || []) {
+          declaration.behavior = "BLOCKING";
+        }
+      }
+    }
+
+    return toolList;
   }
 
   // =========================================================
@@ -561,7 +581,7 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
             },
 
             tools:
-              this.tools(),
+              this.tools(info.model),
 
             // Cấu hình VAD rõ ràng để server chốt lượt nói nhanh hơn thay vì
             // phụ thuộc hoàn toàn vào default (dễ kẹt ACTIVITY_START trong môi
@@ -1211,7 +1231,12 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
       "check_table_food"
     ) {
       const requestedTable = Number(args.table_number);
-      const requestedFood = String(args.food_name || "");
+      const requestedFood = String(args.food_name || "").trim();
+
+      this.onDebug(
+        `FOOD CHECK API START table=${requestedTable} food=${JSON.stringify(requestedFood)}`
+      );
+
       const result = await this.authFetch(
         "/robot-ai/check-food",
         {
@@ -1221,6 +1246,12 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
             food_name: requestedFood
           })
         }
+      );
+
+      this.onDebug(
+        `FOOD CHECK API RESULT table=${requestedTable} found=${Boolean(result?.found)} ` +
+        `deliverable=${Boolean(result?.deliverable)} reason=${result?.reason || "-"} ` +
+        `item=${result?.item?.id ?? "-"} message=${result?.message || ""}`
       );
 
       // Khi robot đang RECEIVED TASK, cùng món + cùng bàn được coi là cùng
@@ -1256,7 +1287,10 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
         same_as_current_task: sameAsCurrentTask,
         current_task: status === "received_task" && currentTask
           ? { ...currentTask }
-          : null
+          : null,
+        checked_at_ms: Date.now(),
+        checked_table_number: requestedTable,
+        checked_food_name: requestedFood
       };
 
       this.lastFoodCheck = enriched;
@@ -1316,16 +1350,61 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
         );
       }
 
+      // Revalidate lần 2 ngay tại thời điểm quản lý xác nhận. Điều này tránh
+      // dùng một kết quả check cũ nếu database đã đổi trong lúc robot hỏi lại.
+      const recheckFoodName = String(
+        checked.checked_food_name || checked.item.food_name || ""
+      ).trim();
+      this.onDebug(
+        `FOOD CHECK REVALIDATE before prepare_delivery table=${tableNumber} food=${JSON.stringify(recheckFoodName)}`
+      );
+      const fresh = await this.authFetch(
+        "/robot-ai/check-food",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            table_number: tableNumber,
+            food_name: recheckFoodName
+          })
+        }
+      );
+
+      const freshItemId = Number(fresh?.item?.id);
+      if (!fresh?.found || !fresh?.deliverable || freshItemId !== checkedItemId) {
+        this.lastFoodCheck = {
+          ...fresh,
+          checked_at_ms: Date.now(),
+          checked_table_number: tableNumber,
+          checked_food_name: recheckFoodName
+        };
+        return {
+          success: true,
+          accepted: false,
+          reason: fresh?.reason || "food_state_changed",
+          message: fresh?.message || "Trạng thái món đã thay đổi. Hãy kiểm tra lại nhiệm vụ."
+        };
+      }
+
+      this.lastFoodCheck = {
+        ...fresh,
+        checked_at_ms: Date.now(),
+        checked_table_number: tableNumber,
+        checked_food_name: recheckFoodName
+      };
+      this.onDebug(
+        `FOOD CHECK REVALIDATE OK item=${freshItemId} table=${tableNumber}`
+      );
+
       return {
         success: true,
         accepted: true,
         waiting_for_food: context.has_food_frontend !== true,
         has_food_frontend: context.has_food_frontend ?? null,
-        item_id: checkedItemId,
-        table_number: checkedTable,
-        table: checkedTable,
-        food_name: checked.item.food_name,
-        route: checked.route,
+        item_id: freshItemId,
+        table_number: tableNumber,
+        table: tableNumber,
+        food_name: fresh.item.food_name,
+        route: fresh.route,
         message: context.has_food_frontend === true
           ? "Món đã có trên robot. Frontend sẽ commit dispatch ngay."
           : "Đã nhận yêu cầu. Hãy mau đặt món lên robot."

@@ -1218,6 +1218,10 @@
     turnAngle: 90,
     uTurnAngle: 180,
     junctionHandled: false,
+    // Tách trạng thái đang xử lý khỏi trạng thái đã xử lý xong.
+    // Không đánh dấu junctionHandled trước khi MQTT + gyro quay thành công.
+    junctionInProgress: false,
+    lastJunctionAttemptAt: 0,
     tableStopSent: false,
     waitingStationHandled: false,
     startYaw: null,
@@ -1432,6 +1436,8 @@
     officialRouteSession.turnAngle = 90;
     officialRouteSession.uTurnAngle = 180;
     officialRouteSession.junctionHandled = false;
+    officialRouteSession.junctionInProgress = false;
+    officialRouteSession.lastJunctionAttemptAt = 0;
     officialRouteSession.tableStopSent = false;
     officialRouteSession.waitingStationHandled = false;
     officialRouteSession.startYaw = null;
@@ -1538,6 +1544,60 @@
     controlState.cameraPermissionReady = true;
   }
 
+  async function refreshOfficialTaskBeforeOutboundJunction() {
+    const data = await api("/robot-ai/status");
+    const robotNumber = Number(controlState.robot) || 1;
+    const robots = data?.robots || {};
+    const robotData =
+      robots[`robot_${robotNumber}`] ||
+      robots[String(robotNumber)] ||
+      null;
+
+    const task = robotData?.tasks;
+    if (!isNonEmptyObject(task)) {
+      throw new Error("Không đọc được task mới nhất trước khi xử lý nga_re.");
+    }
+
+    const expectedCommandId = String(officialRouteSession.task?.command_id || "").trim();
+    const currentCommandId = String(task.command_id || "").trim();
+    if (expectedCommandId && currentCommandId && expectedCommandId !== currentCommandId) {
+      throw new Error(
+        `Task đã thay đổi trước nga_re (${expectedCommandId} -> ${currentCommandId}).`
+      );
+    }
+
+    const currentTable = parseTableNumber(task.table ?? task.table_number);
+    if (
+      currentTable &&
+      officialRouteSession.targetTable &&
+      currentTable !== officialRouteSession.targetTable
+    ) {
+      throw new Error(
+        `Task backend hiện tại là bàn ${currentTable}, khác bàn đang chạy ${officialRouteSession.targetTable}.`
+      );
+    }
+
+    const direction = normalizeRouteTurn(
+      task.junction_turn ?? task.junction_turn_vi ?? ""
+    );
+    if (!direction) {
+      throw new Error("Task backend thiếu junction_turn tại thời điểm gặp nga_re.");
+    }
+
+    officialRouteSession.task = { ...task };
+    officialRouteSession.turnDirection = direction;
+    officialRouteSession.returnJunctionQr = getReturnJunctionQr(direction);
+    controlState.latestTask = { ...task };
+    saveOfficialTaskTemp(task, robotData);
+
+    log(
+      `OFFICIAL JUNCTION FRESH TASK table=${currentTable || officialRouteSession.targetTable} ` +
+      `turn=${direction} command_id=${currentCommandId || "-"}`
+    );
+
+    return direction;
+  }
+
   async function rotateOfficialByGyro(direction, targetAngle, phaseName, label) {
     if (!officialRouteSession.active) {
       throw new Error("Phiên điều hướng đã kết thúc.");
@@ -1631,31 +1691,45 @@
   }
 
   async function runOfficialJunctionTurn() {
-    if (!officialRouteSession.active) return;
+    if (!officialRouteSession.active) {
+      officialRouteSession.junctionInProgress = false;
+      return false;
+    }
 
-    const originalDirection = officialRouteSession.turnDirection;
-    const direction = officialRouteSession.mode === "home"
-      ? oppositeDirection(originalDirection)
-      : originalDirection;
     const targetAngle = officialRouteSession.turnAngle;
-
     const junctionQr = officialRouteSession.mode === "home"
       ? officialRouteSession.returnJunctionQr
       : "nga_re";
 
-    if (!direction) {
-      setMessage(`Đã gặp QR ${junctionQr} nhưng task thiếu hướng rẽ. Robot giữ STOP.`, true);
-      try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
-      return;
-    }
-
     officialRouteSession.phase = "junction_stop";
 
     try {
+      // STOP ngay khi nhận đúng QR để xe không đi quá ngã rẽ trong lúc chờ
+      // API/gyro. Sau đó mới đọc lại task backend để tránh dùng route stale.
       await publishStatusCommandAsync(DEBUG_COMMAND.STOP);
+      log(`OFFICIAL JUNCTION STOP qr=${junctionQr} mode=${officialRouteSession.mode}`);
+
+      if (officialRouteSession.mode === "outbound") {
+        await refreshOfficialTaskBeforeOutboundJunction();
+      }
+
+      const originalDirection = officialRouteSession.turnDirection;
+      const direction = officialRouteSession.mode === "home"
+        ? oppositeDirection(originalDirection)
+        : originalDirection;
+
+      if (!direction) {
+        throw new Error(`Đã gặp QR ${junctionQr} nhưng task thiếu hướng rẽ.`);
+      }
+
       setMessage(
         `Đã thấy ${junctionQr}. Chuẩn bị quay ${direction === "LEFT" ? "trái" : "phải"} ${targetAngle}° ` +
         `(${officialRouteSession.mode === "home" ? "chiều về" : "chiều đi"}).`
+      );
+
+      log(
+        `OFFICIAL JUNCTION TURN qr=${junctionQr} task_turn=${originalDirection} ` +
+        `actual_turn=${direction} command=${direction === "LEFT" ? DEBUG_COMMAND.TURN_LEFT : DEBUG_COMMAND.TURN_RIGHT}`
       );
 
       await rotateOfficialByGyro(
@@ -1668,7 +1742,10 @@
       await new Promise((resolve) => setTimeout(resolve, 120));
       await publishStatusCommandAsync(DEBUG_COMMAND.LINE_FOLLOW);
 
+      // Chỉ đánh dấu đã xử lý sau khi quay đủ góc VÀ đã publish lại LINE_FOLLOW.
+      officialRouteSession.junctionHandled = true;
       officialRouteSession.phase = "line_follow";
+
       if (officialRouteSession.mode === "home") {
         setOfficialStartButtonState(true, `Đang tìm ${officialRouteSession.waitingStationQr}`);
         setMessage(
@@ -1680,11 +1757,21 @@
           `Đã rẽ xong. Tiếp tục bám line và chờ QR ban_${officialRouteSession.targetTable}.`
         );
       }
+
+      log(`OFFICIAL JUNCTION COMPLETE qr=${junctionQr} -> LINE_FOLLOW=3`);
+      return true;
     } catch (error) {
-      officialRouteSession.phase = "error";
+      // Quan trọng: lỗi quay KHÔNG được khóa QR vĩnh viễn. junctionHandled vẫn
+      // false nên khi QR còn trước camera, frontend có thể thử lại sau cooldown.
+      officialRouteSession.junctionHandled = false;
+      officialRouteSession.phase = "junction_retry_wait";
       try { await publishStatusCommandAsync(DEBUG_COMMAND.STOP); } catch (_) {}
-      setMessage(`Không thể xử lý ngã rẽ: ${error.message}`, true);
-      setOfficialStartButtonState(true, "Lỗi ngã rẽ");
+      log(`OFFICIAL JUNCTION ERROR qr=${junctionQr}: ${error.message}`);
+      setMessage(`Không thể xử lý ngã rẽ: ${error.message}. Robot đang STOP và sẽ cho phép thử lại QR.`, true);
+      setOfficialStartButtonState(true, "Chờ thử lại ngã rẽ");
+      return false;
+    } finally {
+      officialRouteSession.junctionInProgress = false;
     }
   }
 
@@ -1836,6 +1923,8 @@
       officialRouteSession.mode = "home";
       officialRouteSession.phase = "starting_home";
       officialRouteSession.junctionHandled = false;
+      officialRouteSession.junctionInProgress = false;
+      officialRouteSession.lastJunctionAttemptAt = 0;
       officialRouteSession.waitingStationHandled = false;
       officialRouteSession.returnJunctionQr = getReturnJunctionQr(
         officialRouteSession.turnDirection
@@ -2066,8 +2155,21 @@
       }
 
       if (text === "nga_re" && officialRouteSession.junctionHandled === false) {
-        officialRouteSession.junctionHandled = true;
-        log(`OFFICIAL QR JUNCTION OUTBOUND ACCEPT area=${areaPercent.toFixed(2)}%`);
+        if (officialRouteSession.junctionInProgress) {
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - Number(officialRouteSession.lastJunctionAttemptAt || 0) < 1200) {
+          return true;
+        }
+
+        officialRouteSession.lastJunctionAttemptAt = now;
+        officialRouteSession.junctionInProgress = true;
+        log(
+          `OFFICIAL QR JUNCTION OUTBOUND ACCEPT area=${areaPercent.toFixed(2)}% ` +
+          `expected_turn=${officialRouteSession.turnDirection || "?"}`
+        );
         void runOfficialJunctionTurn();
         return true;
       }
@@ -2113,7 +2215,17 @@
         text === officialRouteSession.returnJunctionQr &&
         officialRouteSession.junctionHandled === false
       ) {
-        officialRouteSession.junctionHandled = true;
+        if (officialRouteSession.junctionInProgress) {
+          return true;
+        }
+
+        const now = Date.now();
+        if (now - Number(officialRouteSession.lastJunctionAttemptAt || 0) < 1200) {
+          return true;
+        }
+
+        officialRouteSession.lastJunctionAttemptAt = now;
+        officialRouteSession.junctionInProgress = true;
         log(
           `OFFICIAL QR RETURN JUNCTION ACCEPT text=${text} area=${areaPercent.toFixed(2)}% ` +
           `task_turn=${officialRouteSession.turnDirection} ` +
@@ -2212,6 +2324,8 @@
     officialRouteSession.turnAngle = routeInfo.turnAngle;
     officialRouteSession.uTurnAngle = routeInfo.uTurnAngle;
     officialRouteSession.junctionHandled = false;
+    officialRouteSession.junctionInProgress = false;
+    officialRouteSession.lastJunctionAttemptAt = 0;
     officialRouteSession.tableStopSent = false;
     officialRouteSession.waitingStationHandled = false;
     officialRouteSession.supportPhase = "idle";

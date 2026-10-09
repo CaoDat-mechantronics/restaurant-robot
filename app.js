@@ -39,6 +39,12 @@
     wakeActive: false,
     wakeRestartTimer: null,
 
+    // Wake greeting phải phát xong hoàn toàn trước khi bật microphone Gemini.
+    // Nếu mở mic trước, loa của robot có thể tự lọt lại vào VAD của Gemini.
+    wakeGreetingPending: false,
+    wakeGreetingResolve: null,
+    wakeGreetingTimer: null,
+
     logs: [],
 
     // Ghép một yêu cầu nói tự động của robot với turnComplete tương ứng.
@@ -848,6 +854,41 @@
     scheduleWakeRestart(250);
   }
 
+  function finishWakeGreetingWait(reason = "complete") {
+    if (state.wakeGreetingTimer) {
+      clearTimeout(state.wakeGreetingTimer);
+      state.wakeGreetingTimer = null;
+    }
+
+    const resolve = state.wakeGreetingResolve;
+    state.wakeGreetingResolve = null;
+    state.wakeGreetingPending = false;
+
+    if (typeof resolve === "function") {
+      resolve(reason);
+    }
+  }
+
+  function waitForWakeGreetingComplete(timeoutMs = 12000) {
+    if (state.wakeGreetingTimer) {
+      clearTimeout(state.wakeGreetingTimer);
+      state.wakeGreetingTimer = null;
+    }
+
+    state.wakeGreetingPending = true;
+
+    return new Promise((resolve) => {
+      state.wakeGreetingResolve = resolve;
+      state.wakeGreetingTimer = window.setTimeout(() => {
+        state.wakeGreetingTimer = null;
+        state.wakeGreetingResolve = null;
+        state.wakeGreetingPending = false;
+        log("WAKE greeting timeout -> vẫn bật microphone để không kẹt phiên");
+        resolve("timeout");
+      }, timeoutMs);
+    });
+  }
+
   async function activateGeminiListening(source = "button") {
     if (!getToken()) {
       if (source === "button") {
@@ -863,22 +904,42 @@
     try {
       const live = getLive();
 
-      if (!live.mic) {
-        await live.startMic();
-      }
-
-      // Chỉ khi phiên được mở bằng wake phrase "nhân viên phục vụ",
-      // chủ động tạo một turn ẩn để Gemini chào ngay sau khi kết nối.
-      // Nút Nhận lệnh không tự phát câu chào này.
       if (source === "wake") {
+        // QUAN TRỌNG: không bật mic Gemini trước câu chào wake.
+        // Nếu mic đang mở vì một trạng thái cũ thì đóng nó trước để robot
+        // không tự nghe tiếng loa "Dạ em đây ạ." của chính mình.
+        if (live.mic) {
+          live.stopMic();
+        }
+
+        await live.connect();
+        log("WAKE greeting: Gemini connected, microphone OFF");
+
+        const greetingDone = waitForWakeGreetingComplete(12000);
+
         await live.sendText(
-          'Bạn vừa được gọi bằng câu "nhân viên phục vụ". Hãy chỉ đáp đúng một câu: "Dạ em đây ạ." Sau đó tiếp tục lắng nghe người dùng.',
+          'Bạn vừa được gọi bằng câu "nhân viên phục vụ". Hãy chỉ đáp đúng một câu: "Dạ em đây ạ."',
           {
             showTranscript: false
           }
         );
+
+        const wakeResult = await greetingDone;
+        log(`WAKE greeting playback complete (${wakeResult})`);
+
+        // Khoảng đệm nhỏ để đuôi âm thanh từ loa không lọt ngược vào mic.
+        await new Promise((resolve) => setTimeout(resolve, 220));
+
+        await live.startMic();
+        log("WAKE: Gemini microphone ON -> đang lắng nghe người dùng");
+        return;
+      }
+
+      if (!live.mic) {
+        await live.startMic();
       }
     } catch (error) {
+      finishWakeGreetingWait("error");
       resumeWakeRecognition();
       throw error;
     }
@@ -955,6 +1016,13 @@
 
         onTurnComplete:
           () => {
+            // handle() của gemini-live chỉ gọi callback này sau khi PCM đã
+            // phát hết. Vì vậy đây là thời điểm an toàn để bật mic sau câu
+            // chào wake mà không thu lại tiếng loa của robot.
+            if (state.wakeGreetingPending) {
+              finishWakeGreetingWait("turn_complete");
+            }
+
             const tag = state.pendingRobotSpeechTags.shift() || "";
 
             window.dispatchEvent(
