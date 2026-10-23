@@ -109,6 +109,310 @@ class GeminiRobotLive {
   }
 
   // =========================================================
+  // LOCAL KNOWLEDGE SEARCH
+  // =========================================================
+
+  normalizeKnowledgeText(value) {
+    return String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "D")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  knowledgeTokens(value) {
+    const stopWords = new Set([
+      "la", "gi", "va", "voi", "cua", "cho", "toi", "em", "ban",
+      "mot", "nhung", "cac", "co", "khong", "nhu", "the", "nao",
+      "tai", "sao", "vi", "ve", "trong", "duoc", "dung", "hay",
+      "noi", "hoi", "bieu", "trinh", "gioi", "thieu",
+      "robot", "nha", "hang", "he", "thong", "du", "an", "thuat", "toan"
+    ]);
+
+    return this.normalizeKnowledgeText(value)
+      .split(" ")
+      .filter((token) => token.length >= 2 && !stopWords.has(token));
+  }
+
+  searchLocalKnowledge(entries, query, maxResults = 3) {
+    const list = Array.isArray(entries) ? entries : [];
+    const normalizedQuery = this.normalizeKnowledgeText(query);
+    const tokens = this.knowledgeTokens(query);
+    const phrases = [];
+
+    for (let i = 0; i < tokens.length - 1; i++) {
+      phrases.push(`${tokens[i]} ${tokens[i + 1]}`);
+    }
+
+    const scored = list.map((entry, index) => {
+      const title = this.normalizeKnowledgeText(entry?.title);
+      const description = this.normalizeKnowledgeText(entry?.description);
+      const content = this.normalizeKnowledgeText(entry?.content);
+      let score = 0;
+
+      if (normalizedQuery) {
+        if (title === normalizedQuery) score += 120;
+        if (title.includes(normalizedQuery)) score += 80;
+        if (description.includes(normalizedQuery)) score += 35;
+        if (content.includes(normalizedQuery)) score += 15;
+      }
+
+      for (const token of tokens) {
+        if (title.includes(token)) score += 14;
+        if (description.includes(token)) score += 6;
+        if (content.includes(token)) score += 2;
+      }
+
+      for (const phrase of phrases) {
+        if (title.includes(phrase)) score += 12;
+        if (description.includes(phrase)) score += 7;
+        if (content.includes(phrase)) score += 3;
+      }
+
+      const combined = `${title} ${description} ${content}`;
+      const matchedTokenCount = tokens.filter((token) => combined.includes(token)).length;
+      const tokenCoverage = tokens.length
+        ? matchedTokenCount / tokens.length
+        : 0;
+
+      return { entry, index, score, matchedTokenCount, tokenCoverage };
+    });
+
+    scored.sort((a, b) => b.score - a.score || a.index - b.index);
+
+    // Điểm quá thấp nghĩa là tài liệu local không thật sự hỗ trợ câu hỏi.
+    // Khi đó trả rỗng; chỉ lúc matched_count=0 mới cho phép Search fallback.
+    return scored
+      .filter((item) => item.score >= 6)
+      .slice(0, Math.max(1, Math.min(Number(maxResults) || 3, 4)));
+  }
+
+  // =========================================================
+  // ON-DEMAND EXTERNAL SEARCH
+  // =========================================================
+
+  async searchExternalKnowledge(queryValue) {
+    const query = String(queryValue || "").trim();
+
+    if (!query) {
+      return {
+        success: false,
+        source: "google_search_on_demand",
+        error: "Thiếu nội dung cần tra cứu.",
+        fallback_to_model_knowledge: true
+      };
+    }
+
+    // Search được chạy bằng MỘT PHIÊN LIVE PHỤ hoàn toàn tách biệt.
+    // Phiên chính không khai báo googleSearch trong setup nên không bị lỗi
+    // quota Search ngay khi người dùng chỉ muốn nói chuyện bình thường.
+    let info;
+    try {
+      info = await this.getToken();
+    } catch (error) {
+      return {
+        success: false,
+        source: "google_search_on_demand",
+        query,
+        error: error?.message || String(error),
+        fallback_to_model_knowledge: true
+      };
+    }
+
+    if (!info?.token || !info?.model) {
+      return {
+        success: false,
+        source: "google_search_on_demand",
+        query,
+        error: "Backend không trả token/model cho phiên Search phụ.",
+        fallback_to_model_knowledge: true
+      };
+    }
+
+    const url =
+      `${window.APP_CONFIG.GEMINI_WS_BASE}` +
+      `?access_token=${encodeURIComponent(info.token)}`;
+
+    this.onDebug(
+      `EXTERNAL SEARCH START query=${JSON.stringify(query)} model=${info.model}`
+    );
+
+    return await new Promise((resolve) => {
+      let ws = null;
+      let settled = false;
+      let setupComplete = false;
+      let transcript = "";
+      let textParts = "";
+
+      const finish = (result) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        clearTimeout(timeoutId);
+
+        try {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close(1000, "search complete");
+          }
+        } catch (_) {}
+
+        resolve(result);
+      };
+
+      const timeoutId = window.setTimeout(() => {
+        finish({
+          success: false,
+          source: "google_search_on_demand",
+          query,
+          error: "Search timeout sau 25 giây.",
+          fallback_to_model_knowledge: true
+        });
+      }, 25000);
+
+      try {
+        ws = new WebSocket(url);
+        ws.binaryType = "arraybuffer";
+      } catch (error) {
+        finish({
+          success: false,
+          source: "google_search_on_demand",
+          query,
+          error: error?.message || String(error),
+          fallback_to_model_knowledge: true
+        });
+        return;
+      }
+
+      ws.onopen = () => {
+        const setupMessage = {
+          setup: {
+            model: `models/${info.model}`,
+            generationConfig: {
+              responseModalities: ["AUDIO"]
+            },
+            systemInstruction: {
+              parts: [
+                {
+                  text:
+                    "Bạn là công cụ tra cứu phụ. Hãy dùng Google Search để trả lời câu hỏi bằng tiếng Việt, ngắn gọn, ưu tiên dữ kiện kiểm chứng được. Không tự nhận vai robot và không suy diễn đặc điểm dự án. Chỉ trả nội dung tra cứu cần thiết."
+                }
+              ]
+            },
+            tools: [
+              {
+                googleSearch: {}
+              }
+            ],
+            // Live chỉ phát audio; bật transcript để lấy phần trả lời dạng text
+            // và đưa lại cho phiên robot chính mà không phát audio Search phụ.
+            outputAudioTranscription: {}
+          }
+        };
+
+        ws.send(JSON.stringify(setupMessage));
+      };
+
+      ws.onmessage = async (event) => {
+        let message;
+
+        try {
+          message = await this.decodeWebSocketMessage(event.data);
+        } catch (error) {
+          this.onDebug(
+            `EXTERNAL SEARCH DECODE ERROR ${error?.message || error}`
+          );
+          return;
+        }
+
+        if (message?.setupComplete && !setupComplete) {
+          setupComplete = true;
+
+          ws.send(JSON.stringify({
+            clientContent: {
+              turns: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: query
+                    }
+                  ]
+                }
+              ],
+              turnComplete: true
+            }
+          }));
+          return;
+        }
+
+        const content = message?.serverContent;
+
+        if (content?.outputTranscription?.text) {
+          transcript += content.outputTranscription.text;
+        }
+
+        for (const part of content?.modelTurn?.parts || []) {
+          if (part?.text) {
+            textParts += part.text;
+          }
+        }
+
+        if (content?.turnComplete) {
+          const answer = String(transcript || textParts || "").trim();
+
+          this.onDebug(
+            `EXTERNAL SEARCH COMPLETE chars=${answer.length}`
+          );
+
+          finish({
+            success: answer.length > 0,
+            source: "google_search_on_demand",
+            query,
+            answer,
+            fallback_to_model_knowledge: answer.length === 0,
+            note:
+              "Kết quả này là thông tin tra cứu bên ngoài. Không được khẳng định đây là đặc điểm thật của robot/nhà hàng nếu knowledge local không xác nhận."
+          });
+        }
+      };
+
+      ws.onerror = () => {
+        this.onDebug("EXTERNAL SEARCH websocket error");
+      };
+
+      ws.onclose = (event) => {
+        if (settled) {
+          return;
+        }
+
+        const reason = String(event?.reason || "").trim();
+        const message =
+          `Search session đóng code=${event?.code || 0}` +
+          (reason ? ` reason=${reason}` : "");
+
+        this.onDebug(`EXTERNAL SEARCH FAIL ${message}`);
+
+        finish({
+          success: false,
+          source: "google_search_on_demand",
+          query,
+          error: message,
+          quota_or_access_error:
+            event?.code === 1011 ||
+            /quota|billing|exceeded|resource/i.test(reason),
+          fallback_to_model_knowledge: true
+        });
+      };
+    });
+  }
+
+  // =========================================================
   // SYSTEM INSTRUCTION
   // =========================================================
 
@@ -195,6 +499,28 @@ QUY TẮC TƯ VẤN MENU BẮT BUỘC:
 5. Nếu khách hỏi dị ứng hoặc kiêng một nguyên liệu, chỉ được căn cứ danh sách ingredients trong data.js. Dữ liệu này không phải chứng nhận dị ứng; nếu có rủi ro dị ứng nghiêm trọng, phải nói rõ nên xác nhận lại với nhân viên/bếp.
 
 6. read_menu chỉ dùng để tra cứu/tư vấn menu. Nếu khách yêu cầu GIAO một món tới bàn, sau khi xác định món vẫn phải tuân theo quy trình check_table_food → xác nhận → prepare_delivery ở bên dưới.
+
+QUY TẮC KIẾN THỨC ROBOT VÀ NHÀ HÀNG BẮT BUỘC:
+
+1. Khi người dùng hỏi về thiết kế, công nghệ, cấu tạo, nguyên lý, AI, SDV, ESP32, camera, QR, cảm biến, bám đường, PWM, MQTT, điều khiển, hạn chế hoặc hướng phát triển của CHÍNH ROBOT hiện tại, LUÔN gọi read_robot_knowledge trước khi trả lời.
+
+2. Khi trả lời nội dung về robot, hãy nói với tư cách chính robot đang mô tả bản thân, ví dụ: "trong thiết kế của em...", "ESP32 của em...", "em sử dụng điện thoại...". Danh tính vẫn luôn là nhân viên phục vụ số hiện tại của nhà hàng Bắc Duyên Hà. Không tự đổi vai thành Gemini/chatbot.
+
+3. Khi người dùng hỏi về toàn bộ hệ thống nhà hàng Bắc Duyên Hà, AIoT, 10 bàn, trang quản lý, backend, FastAPI, Firebase, MQTT/HiveMQ, kiến trúc, bảo mật, luồng đặt món hoặc định hướng phát triển nhà hàng, LUÔN gọi read_restaurant_knowledge trước khi trả lời.
+
+4. Hai file robot-knowledge.js và restaurant-knowledge.js là nguồn sự thật ưu tiên cao nhất cho các đặc điểm của dự án. Không dùng kiến thức chung hoặc web để phủ định, thay thế hay tự bổ sung một tính năng dự án mà hai file này không xác nhận.
+
+5. SEARCH CHỈ LÀ FALLBACK SAU LOCAL: chỉ khi read_robot_knowledge hoặc read_restaurant_knowledge của CHÍNH CÂU HỎI HIỆN TẠI trả matched_count=0 và fallback_recommended=true thì mới được gọi search_external_knowledge. Nếu local trả matched_count>=1 thì KHÔNG gọi search ngoài, kể cả khi muốn bổ sung thêm chi tiết.
+
+5a. search_external_knowledge mở một phiên tra cứu phụ tách biệt khỏi phiên Live chính, vì vậy KHÔNG được gọi trước tool knowledge local. Khi Search trả success=true, chỉ dùng kết quả đó như KIẾN THỨC CHUNG hoặc thông tin bên ngoài và phải phân biệt rõ bằng cách nói theo ý: "phần này chưa được mô tả trong dữ liệu kỹ thuật của em; theo thông tin em tra cứu..." hoặc "về mặt kỹ thuật nói chung...".
+
+5b. Nếu search_external_knowledge trả success=false do quota, mạng hoặc Search không khả dụng, vẫn giữ phiên Live chính. Khi đó được phép trả lời bằng kiến thức nền của model nếu biết, nhưng phải nói rõ đây là kiến thức chung và không được biến nó thành đặc điểm của dự án.
+
+6. Không được lấy thông tin tra cứu ngoài rồi khẳng định đó là phần cứng, thuật toán, thông số, tính năng hay trạng thái thật của chính robot/nhà hàng nếu dữ liệu local không xác nhận. Ví dụ nếu local không nói robot có SLAM thì không được tra web rồi nói "em sử dụng SLAM".
+
+7. Với yêu cầu "trình bày toàn bộ về robot" hoặc tương tự, gọi read_robot_knowledge với mode="presentation". Với yêu cầu trình bày toàn bộ hệ thống nhà hàng, gọi read_restaurant_knowledge với mode="presentation". Khi trình bày, diễn đạt tự nhiên và giữ đúng ý nguồn; không đọc metadata title/description như dữ liệu thô.
+
+8. Các tool knowledge và search_external_knowledge CHỈ ĐỌC dữ liệu. Chúng tuyệt đối không được thay đổi state robot, task, MQTT, camera, database hoặc quy trình giao món.
 
 QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
 
@@ -297,6 +623,70 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
             }
           },
           {
+            name: "read_robot_knowledge",
+            description:
+              "Tra cứu dữ liệu kỹ thuật/thuyết trình về chính robot phục vụ Bắc Duyên Hà từ robot-knowledge.js. Bắt buộc dùng trước khi trả lời về thiết kế, công nghệ, SDV, điện thoại, ESP32, AI/Gemini, camera, QR, cảm biến, bám line, PWM, MQTT, state machine, hạn chế hoặc nguyên lý robot. Nếu người dùng yêu cầu trình bày toàn bộ robot, truyền mode='presentation'.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                query: {
+                  type: "STRING",
+                  description: "Câu hỏi/chủ đề cần tra cứu. Ví dụ: 'vai trò ESP32', 'robot bám line thế nào', 'SDV'."
+                },
+                mode: {
+                  type: "STRING",
+                  enum: ["answer", "presentation"],
+                  description: "answer để tìm 1-4 mục liên quan; presentation chỉ dùng khi được yêu cầu trình bày toàn bộ bài robot."
+                },
+                max_results: {
+                  type: "INTEGER",
+                  description: "Số mục tối đa khi mode=answer, từ 1 đến 4. Mặc định 3."
+                }
+              },
+              required: ["query"]
+            }
+          },
+          {
+            name: "read_restaurant_knowledge",
+            description:
+              "Tra cứu dữ liệu thuyết trình/hỏi đáp về toàn bộ hệ thống nhà hàng thông minh Bắc Duyên Hà từ restaurant-knowledge.js: AIoT, 10 bàn, menu, trang quản lý, backend Python/FastAPI, Firebase, MQTT/HiveMQ, robot trong hệ thống, bảo mật, quy trình và hạn chế. Nếu người dùng yêu cầu trình bày toàn bộ nhà hàng, truyền mode='presentation'.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                query: {
+                  type: "STRING",
+                  description: "Câu hỏi/chủ đề cần tra cứu. Ví dụ: 'FastAPI dùng làm gì', 'kiến trúc AIoT', 'Firebase'."
+                },
+                mode: {
+                  type: "STRING",
+                  enum: ["answer", "presentation"],
+                  description: "answer để tìm 1-4 mục liên quan; presentation chỉ dùng khi được yêu cầu trình bày toàn bộ hệ thống nhà hàng."
+                },
+                max_results: {
+                  type: "INTEGER",
+                  description: "Số mục tối đa khi mode=answer, từ 1 đến 4. Mặc định 3."
+                }
+              },
+              required: ["query"]
+            }
+          },
+          {
+            name: "search_external_knowledge",
+            description:
+              "Tra cứu Google Search THEO YÊU CẦU và chỉ được gọi SAU read_robot_knowledge hoặc read_restaurant_knowledge của chính câu hỏi hiện tại khi tool local trả matched_count=0 và fallback_recommended=true. Không gọi nếu local đã có ít nhất 1 mục phù hợp. Search chạy trong phiên phụ nên lỗi quota Search không được làm đóng phiên Live chính.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                query: {
+                  type: "STRING",
+                  description:
+                    "Câu hỏi cần tra cứu ngoài. Nên giữ nguyên ý người dùng và bổ sung ngữ cảnh kỹ thuật cần thiết."
+                }
+              },
+              required: ["query"]
+            }
+          },
+          {
             name: "check_table_food",
             description:
               "FRESH CHECK bắt buộc qua API backend cho đúng bàn + món hiện tại. Mỗi yêu cầu giao món mới phải gọi tool này lại trước khi nói bàn có/không có món hoặc món có giao được hay không; không được dùng kết quả cũ.",
@@ -383,6 +773,7 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
         ]
       }
     ];
+
 
     // Gemini 3.8 Live mặc định dùng function calling bất đồng bộ.
     // Luồng nghiệp vụ giao món của robot cần tool chạy tuần tự để không nói
@@ -1224,6 +1615,147 @@ QUY TẮC NGHIỆP VỤ GIAO MÓN BẮT BUỘC:
           available: item.available === true
         }))
       };
+    }
+
+    if (
+      name ===
+      "read_robot_knowledge"
+    ) {
+      const entries = Array.isArray(window.ROBOT_KNOWLEDGE)
+        ? window.ROBOT_KNOWLEDGE
+        : [];
+
+      if (!entries.length) {
+        return {
+          success: true,
+          source: "frontend/robot-knowledge.js",
+          query: String(args?.query || "").trim(),
+          mode: String(args?.mode || "answer"),
+          total_entries: 0,
+          matched_count: 0,
+          fallback_recommended: true,
+          message: "Không đọc được dữ liệu robot local. Có thể gọi search_external_knowledge cho kiến thức chung, nhưng không được tự khẳng định đó là đặc điểm thật của robot."
+        };
+      }
+
+      const query = String(args?.query || "").trim();
+      const mode = String(args?.mode || "answer").trim().toLowerCase();
+      const maxResults = Math.max(1, Math.min(Number(args?.max_results) || 3, 4));
+
+      let matches;
+      if (mode === "presentation") {
+        // Array được tạo theo đúng thứ tự tài liệu: entry 0 là phần phạm vi,
+        // các entry 1..9 chính là 9 mục của PHẦN I bài thuyết trình robot.
+        matches = entries.slice(1, 10).map((entry, index) => ({
+          entry,
+          score: 1000 - index,
+          tokenCoverage: 1
+        }));
+      } else {
+        matches = this.searchLocalKnowledge(entries, query, maxResults);
+      }
+
+      this.onDebug(
+        `KNOWLEDGE ROBOT query=${JSON.stringify(query)} mode=${mode} matched=${matches.length}`
+      );
+
+      return {
+        success: true,
+        source: "frontend/robot-knowledge.js",
+        query,
+        mode,
+        total_entries: entries.length,
+        matched_count: matches.length,
+        fallback_recommended:
+          matches.length === 0,
+        query_token_coverage: Number(matches[0]?.tokenCoverage || 0),
+        persona_rule:
+          "Khi dùng dữ liệu này, hãy trả lời như chính robot đang nói về bản thân; vẫn giữ danh tính nhân viên phục vụ số hiện tại của nhà hàng Bắc Duyên Hà.",
+        matches: matches.map(({ entry, score, tokenCoverage }) => ({
+          title: entry.title,
+          description: entry.description,
+          content: entry.content,
+          score,
+          token_coverage: Number(tokenCoverage || 0)
+        }))
+      };
+    }
+
+    if (
+      name ===
+      "read_restaurant_knowledge"
+    ) {
+      const entries = Array.isArray(window.RESTAURANT_KNOWLEDGE)
+        ? window.RESTAURANT_KNOWLEDGE
+        : [];
+
+      if (!entries.length) {
+        return {
+          success: true,
+          source: "frontend/restaurant-knowledge.js",
+          query: String(args?.query || "").trim(),
+          mode: String(args?.mode || "answer"),
+          total_entries: 0,
+          matched_count: 0,
+          fallback_recommended: true,
+          message: "Không đọc được dữ liệu nhà hàng local. Có thể gọi search_external_knowledge cho kiến thức chung, nhưng không được tự khẳng định đó là đặc điểm thật của nhà hàng Bắc Duyên Hà."
+        };
+      }
+
+      const query = String(args?.query || "").trim();
+      const mode = String(args?.mode || "answer").trim().toLowerCase();
+      const maxResults = Math.max(1, Math.min(Number(args?.max_results) || 3, 4));
+
+      let matches;
+      if (mode === "presentation") {
+        // Entry 0 là phần phạm vi. Entries 1..20 giữ nguyên PHẦN I của tài liệu
+        // nhà hàng, bao gồm các mục 5.1/5.2/5.3 theo đúng thứ tự nguồn.
+        matches = entries.slice(1, 21).map((entry, index) => ({
+          entry,
+          score: 1000 - index,
+          tokenCoverage: 1
+        }));
+      } else {
+        matches = this.searchLocalKnowledge(entries, query, maxResults);
+      }
+
+      this.onDebug(
+        `KNOWLEDGE RESTAURANT query=${JSON.stringify(query)} mode=${mode} matched=${matches.length}`
+      );
+
+      return {
+        success: true,
+        source: "frontend/restaurant-knowledge.js",
+        query,
+        mode,
+        total_entries: entries.length,
+        matched_count: matches.length,
+        fallback_recommended:
+          matches.length === 0,
+        query_token_coverage: Number(matches[0]?.tokenCoverage || 0),
+        persona_rule:
+          "Khi dùng dữ liệu này, hãy trả lời với tư cách nhân viên phục vụ số hiện tại của nhà hàng Bắc Duyên Hà; không biến thông tin toàn hệ thống thành đặc điểm riêng của robot nếu nguồn không nói vậy.",
+        matches: matches.map(({ entry, score, tokenCoverage }) => ({
+          title: entry.title,
+          description: entry.description,
+          content: entry.content,
+          score,
+          token_coverage: Number(tokenCoverage || 0)
+        }))
+      };
+    }
+
+    if (
+      name ===
+      "search_external_knowledge"
+    ) {
+      const query = String(args?.query || "").trim();
+
+      this.onDebug(
+        `EXTERNAL SEARCH TOOL query=${JSON.stringify(query)}`
+      );
+
+      return await this.searchExternalKnowledge(query);
     }
 
     if (
