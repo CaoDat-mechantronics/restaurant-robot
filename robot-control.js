@@ -476,6 +476,18 @@
       recordRobotActivity(message);
     },
 
+    onLineSpeedReport: (payload) => {
+      window.dispatchEvent(new CustomEvent("robot-line-speeds", {
+        detail: { ...payload, receivedAt: Date.now() }
+      }));
+    },
+
+    onTurnSpeedReport: (payload) => {
+      window.dispatchEvent(new CustomEvent("robot-turn-speeds", {
+        detail: { ...payload, receivedAt: Date.now() }
+      }));
+    },
+
     onReq: (payload, topic) => {
       // Frontend cũng subscribe topic/req nên sẽ nhận lại request do chính nó
       // publish. Không được tính đây là message từ robot.

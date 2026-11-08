@@ -10,6 +10,8 @@
       onReq = () => {},
       onRes = () => {},
       onRobotMessage = () => {},
+      onLineSpeedReport = () => {},
+      onTurnSpeedReport = () => {},
       onDebug = () => {}
     }) {
       this.config = config || {};
@@ -20,6 +22,8 @@
       this.onReq = onReq;
       this.onRes = onRes;
       this.onRobotMessage = onRobotMessage;
+      this.onLineSpeedReport = onLineSpeedReport;
+      this.onTurnSpeedReport = onTurnSpeedReport;
       this.onDebug = onDebug;
 
       this.client = null;
@@ -133,7 +137,10 @@
         // Frontend publish topic/req = 1 khi im lặng 30 giây.
         // ESP32 phản hồi topic/res = 1 ngay khi nhận request.
         "topic/req",
-        "topic/res"
+        "topic/res",
+        // Tốc độ PWM đang được ESP32 dùng (topic chung, có robot_id).
+        "setting/esp32_tocdo",
+        "setting/esp32_quay"
       ];
 
       this.client.subscribe(topics, { qos: 0 }, (error) => {
@@ -175,6 +182,25 @@
         payload = JSON.parse(raw);
       } catch (_) {
         payload = raw;
+      }
+
+      // ESP32 phản hồi profile PWM bám line mỗi 30 giây, hoặc khi GET/SET.
+      if (topic === "setting/esp32_tocdo") {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+            payload.type !== "actual_line_speed" ||
+            payload.robot_id !== `robot${this.robot}`) return;
+        this.onRobotMessage({ topic, payload, raw, receivedAt: Date.now() });
+        this.onLineSpeedReport(payload, topic);
+        return;
+      }
+
+      // PWM quay không được tính là tín hiệu alive để giữ nguyên giám sát cũ.
+      if (topic === "setting/esp32_quay") {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+            payload.type !== "actual_turn_speed" ||
+            payload.robot_id !== `robot${this.robot}`) return;
+        this.onTurnSpeedReport(payload, topic);
+        return;
       }
 
       // topic/req là request do frontend publish. Vì frontend cũng subscribe
@@ -231,6 +257,50 @@
 
         this.onStatus(payload, topic);
       }
+    }
+
+    publishLineSpeedProfile(profile, seq) {
+      if (!this.client || !this.connected) return false;
+      const payload = {
+        type: "set",
+        robot_id: `robot${this.robot}`,
+        base_speed: profile.base_speed,
+        soft_fast_speed: profile.soft_fast_speed,
+        soft_slow_speed: profile.soft_slow_speed,
+        hard_fast_speed: profile.hard_fast_speed,
+        hard_slow_speed: profile.hard_slow_speed,
+        seq
+      };
+      this.client.publish("setting/tocdo", JSON.stringify(payload),
+        { qos: 0, retain: false });
+      return true; // Chỉ gửi lên MQTT; cần telemetry để xác nhận ESP32 đã áp dụng.
+    }
+
+    requestLineSpeedProfile() {
+      if (!this.client || !this.connected) return false;
+      this.client.publish("setting/tocdo",
+        JSON.stringify({ type: "get", robot_id: `robot${this.robot}` }),
+        { qos: 0, retain: false });
+      return true;
+    }
+
+    publishTurnSpeedProfile(profile, seq) {
+      if (!this.client || !this.connected) return false;
+      this.client.publish("setting/quay", JSON.stringify({
+        type: "set", robot_id: `robot${this.robot}`,
+        forward_speed: profile.forward_speed,
+        reverse_speed: profile.reverse_speed,
+        seq
+      }), { qos: 0, retain: false });
+      return true; // Chỉ xác nhận khi ESP32 phản hồi status=applied, seq tương ứng.
+    }
+
+    requestTurnSpeedProfile() {
+      if (!this.client || !this.connected) return false;
+      this.client.publish("setting/quay", JSON.stringify({
+        type: "get", robot_id: `robot${this.robot}`
+      }), { qos: 0, retain: false });
+      return true;
     }
 
     publishAliveRequest() {

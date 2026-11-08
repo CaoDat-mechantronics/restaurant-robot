@@ -3302,3 +3302,73 @@ body.debug-mode-enabled #cameraSwitchButton {
   }
 }
 
+
+/* ============================================================
+   PWM ESP32 realtime setting. Only advanced panel, no other styles.
+   ============================================================ */
+.settings-speed-group-heading {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0 7px;
+  border-top: 1px solid var(--line);
+}
+.settings-speed-group-heading > b { color: #d7ebff; font-size: 14px; }
+.settings-speed-group-heading > small { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.settings-line-pwm-field .settings-number-control input { width: 86px; }
+.settings-line-pwm-field input.settings-line-pwm-mismatch {
+  border-color: #f05c65;
+  color: #ff666f;
+  font-weight: 800;
+  background: #29131d;
+}
+.settings-line-pwm-mismatch-row b { color: #ff7e84; }
+.settings-line-pwm-info {
+  color: #a5c3da;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  background: #0c1b2e;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.settings-line-pwm-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+}
+.settings-line-pwm-actions button {
+  padding: 10px 9px;
+  min-height: 44px;
+  font-weight: 700;
+  color: var(--text);
+  background: #112943;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.settings-line-pwm-actions button:hover { border-color: #58a8ff; }
+.settings-line-pwm-actions .settings-line-pwm-send { background: #124c70; border-color: #276d96; }
+.settings-line-pwm-actual[hidden] { display: none; }
+.settings-line-pwm-actual {
+  border: 1px solid #345a7b;
+  border-radius: 11px;
+  background: #0d2135;
+  padding: 13px;
+  color: var(--text);
+  display: grid;
+  gap: 9px;
+}
+.settings-line-pwm-actual > b { font-size: 13px; }
+.settings-line-pwm-actual small { color: var(--muted); line-height: 1.4; }
+.settings-line-pwm-actual-list { display: grid; gap: 5px; }
+.settings-line-pwm-actual-list > div { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.settings-line-pwm-actual-list strong { font-variant-numeric: tabular-nums; }
+@media (max-width: 400px) {
+  .settings-line-pwm-actions { grid-template-columns: 1fr; }
+}
+
+/* PWM quay: tái sử dụng ô lỗi đỏ của PWM bám line, không ảnh hưởng vùng khác. */
+.settings-turn-pwm-field .settings-number-control input { width: 86px; }
+.settings-turn-pwm-field input.settings-line-pwm-mismatch {
+  border-color: #f05c65; color: #ff666f; font-weight: 800; background: #29131d;
+}

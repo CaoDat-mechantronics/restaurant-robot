@@ -17,7 +17,7 @@
 
   <link
     rel="stylesheet"
-    href="styles.css?v=20261007-reset-robot-1"
+    href="styles.css?v=20261108-turn-pwm-1"
   >
 </head>
 
@@ -977,6 +977,137 @@
         </div>
       </label>
 
+      <div class="settings-speed-group-heading">
+        <b>PWM bám line trên ESP32</b>
+        <small>5 giá trị PWM có dấu (−255 đến +255). Tách biệt với tốc độ logic của camera ở phía trên.</small>
+      </div>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-line-pwm-field" data-line-key="base_speed">
+        <span>
+          <b>Base speed</b>
+          <small>Đi thẳng: hai bên cùng PWM.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsBaseSpeed" type="number" min="0" max="255"
+                 step="1" value="80" inputmode="numeric" aria-label="Base speed">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-line-pwm-field" data-line-key="soft_fast_speed">
+        <span>
+          <b>Soft fast speed</b>
+          <small>Bên nhanh khi cảm biến ngoài chạm vạch.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsSoftFastSpeed" type="number" min="0" max="255"
+                 step="1" value="135" inputmode="numeric" aria-label="Soft fast speed">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-line-pwm-field" data-line-key="soft_slow_speed">
+        <span>
+          <b>Soft low speed</b>
+          <small>Bên còn lại khi sửa nhẹ: âm = lùi, 0 = dừng.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsSoftSlowSpeed" type="number" min="-255" max="255"
+                 step="1" value="80" inputmode="numeric" aria-label="Soft low speed">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-line-pwm-field" data-line-key="hard_fast_speed">
+        <span>
+          <b>Hard fast speed</b>
+          <small>Bên nhanh khi cảm biến trong chạm vạch.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsHardFastSpeed" type="number" min="0" max="255"
+                 step="1" value="170" inputmode="numeric" aria-label="Hard fast speed">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-line-pwm-field" data-line-key="hard_slow_speed">
+        <span>
+          <b>Hard slow speed</b>
+          <small>Bên còn lại khi sửa mạnh: âm = lùi, 0 = dừng.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsHardSlowSpeed" type="number" min="-255" max="255"
+                 step="1" value="-80" inputmode="numeric" aria-label="Hard slow speed">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <div class="settings-line-pwm-info" id="settingsLinePwmStatus" role="status" aria-live="polite">
+        Chưa nhận cấu hình PWM từ ESP32. Các giá trị trên là cấu hình giao diện.
+      </div>
+
+      <div class="settings-line-pwm-actions">
+        <button id="settingsLinePwmShowActualButton" type="button" aria-expanded="false">
+          Hiển thị tốc độ thực tế ESP32
+        </button>
+        <button id="settingsLinePwmSendButton" type="button" class="settings-line-pwm-send">
+          Gửi 5 tốc độ đến robot
+        </button>
+      </div>
+
+      <div id="settingsLinePwmActualPanel" class="settings-line-pwm-actual" hidden>
+        <b>PWM đang áp dụng trên ESP32</b>
+        <div id="settingsLinePwmActualValues">Chưa có dữ liệu.</div>
+        <small>Đây là PWM cấu hình điều khiển motor, không phải tốc độ RPM đo bằng encoder.</small>
+      </div>
+
+      <!-- PWM QUAY ESP32: RIÊNG với tốc độ logic quay theo gyro và PWM bám line. -->
+      <div class="settings-speed-group-heading">
+        <b>PWM quay trái/phải trên ESP32</b>
+        <small>Hai mức PWM 0–255 điều khiển bánh tiến và bánh lùi khi quay tại chỗ. Không đổi góc quay, nhận dạng QR hay tốc độ bám line. Giữ hiệu chỉnh bánh sau của firmware.</small>
+      </div>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-turn-pwm-field" data-turn-key="forward_speed">
+        <span>
+          <b>Turn forward PWM</b>
+          <small>Độ lớn PWM của hai bánh bên tiến khi quay.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsTurnForwardPwm" type="number" min="0" max="255" step="1"
+                 value="120" inputmode="numeric" aria-label="Turn forward PWM">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <label class="settings-field settings-number-field settings-speed-field settings-turn-pwm-field" data-turn-key="reverse_speed">
+        <span>
+          <b>Turn reverse PWM</b>
+          <small>Nhập độ lớn 0–255; ESP32 tự đảo chiều motor bên lùi.</small>
+        </span>
+        <div class="settings-number-control">
+          <input id="settingsTurnReversePwm" type="number" min="0" max="255" step="1"
+                 value="120" inputmode="numeric" aria-label="Turn reverse PWM">
+          <span>PWM</span>
+        </div>
+      </label>
+
+      <div class="settings-line-pwm-info" id="settingsTurnPwmStatus" role="status" aria-live="polite">
+        Chưa nhận PWM quay từ ESP32. Dừng robot trước khi gửi thay đổi.
+      </div>
+      <div class="settings-line-pwm-actions">
+        <button id="settingsTurnPwmShowActualButton" type="button" aria-expanded="false">
+          Hiển thị PWM quay ESP32
+        </button>
+        <button id="settingsTurnPwmSendButton" type="button" class="settings-line-pwm-send">
+          Gửi 2 PWM quay đến robot
+        </button>
+      </div>
+      <div id="settingsTurnPwmActualPanel" class="settings-line-pwm-actual" hidden>
+        <b>PWM quay đang lưu trên ESP32</b>
+        <div id="settingsTurnPwmActualValues">Chưa có dữ liệu.</div>
+        <small>Các số này là PWM tham chiếu; motor phía sau vẫn được bù theo tỉ lệ hiệu chỉnh gốc 140/120. Không phải RPM thực đo.</small>
+      </div>
+
       <button
         id="settingsAdvancedUpdateEsp32Button"
         class="settings-advanced-esp32-button"
@@ -1076,12 +1207,12 @@
 <script src="robot-knowledge.js?v=20261022-knowledge-1"></script>
 <script src="restaurant-knowledge.js?v=20261022-knowledge-1"></script>
 <script src="gemini-live.js?v=20261022-knowledge-1"></script>
-<script src="mqtt-robot.js?v=20260930-audioworklet-1"></script>
+<script src="mqtt-robot.js?v=20261108-turn-pwm-1"></script>
 <script src="orientation.js?v=20260930-audioworklet-1"></script>
 <script src="vision.js?v=20261002-qr-red-overlay-1"></script>
 <script src="navigation.js?v=20260930-manual-debug-1"></script>
 <script src="app.js?v=20261007-reset-robot-1"></script>
-<script src="robot-control.js?v=20261007-reset-robot-1"></script>
+<script src="robot-control.js?v=20261108-turn-pwm-1"></script>
 <script>
 (() => {
   const sourceBuild = window.ROBOT_SOURCE_BUILD_LABEL
@@ -1178,6 +1309,249 @@
   const settingsTurnSpeed = document.getElementById("settingsTurnSpeed");
   const settingsLineFollowSpeed = document.getElementById("settingsLineFollowSpeed");
   const settingsCornerEntrySpeed = document.getElementById("settingsCornerEntrySpeed");
+  const LINE_SPEED_FIELDS = [
+    { key: "base_speed",       id: "settingsBaseSpeed",     fallback: 80,  min: 0,    max: 255, label: "Base speed" },
+    { key: "soft_fast_speed",  id: "settingsSoftFastSpeed", fallback: 135, min: 0,    max: 255, label: "Soft fast speed" },
+    { key: "soft_slow_speed",  id: "settingsSoftSlowSpeed", fallback: 80,  min: -255, max: 255, label: "Soft low speed" },
+    { key: "hard_fast_speed",  id: "settingsHardFastSpeed", fallback: 170, min: 0,    max: 255, label: "Hard fast speed" },
+    { key: "hard_slow_speed",  id: "settingsHardSlowSpeed", fallback: -80, min: -255, max: 255, label: "Hard slow speed" }
+  ];
+  const linePwmStatus = document.getElementById("settingsLinePwmStatus");
+  const linePwmActualPanel = document.getElementById("settingsLinePwmActualPanel");
+  const linePwmActualValues = document.getElementById("settingsLinePwmActualValues");
+  const linePwmShowActualButton = document.getElementById("settingsLinePwmShowActualButton");
+  const linePwmSendButton = document.getElementById("settingsLinePwmSendButton");
+  const reportedLineProfiles = new Map();
+  let lineSpeedSeq = 0;
+  let pendingLineSpeedSeq = 0;
+  let pendingLineSpeedRobot = null;
+  let linePwmActionMessage = "";
+
+  const lineRobotId = () => `robot${Number(settingsRobotSelect?.value || robotSelect?.value || 1)}`;
+  const defaultLineSpeedProfile = () => Object.fromEntries(
+    LINE_SPEED_FIELDS.map(field => [field.key, field.fallback])
+  );
+  const readLineSpeedProfile = () => {
+    const profile = {};
+    for (const field of LINE_SPEED_FIELDS) {
+      const input = document.getElementById(field.id);
+      const raw = String(input?.value ?? "").trim();
+      const number = Number(raw);
+      if (!raw || !Number.isInteger(number) || number < field.min || number > field.max) {
+        throw new Error(`${field.label}: nhập số nguyên từ ${field.min} đến ${field.max}.`);
+      }
+      profile[field.key] = number;
+    }
+    return profile;
+  };
+  const fillLineSpeedProfile = (profile) => {
+    for (const field of LINE_SPEED_FIELDS) {
+      const input = document.getElementById(field.id);
+      const candidate = Number(profile?.[field.key]);
+      const value = Number.isInteger(candidate) &&
+        candidate >= field.min && candidate <= field.max ? candidate : field.fallback;
+      if (input) input.value = String(value);
+    }
+    renderLineSpeedComparison();
+  };
+  const storedLineSpeedProfile = (robotId) => {
+    const saved = readStoredSettings();
+    return saved?.lineSpeedSettingsByRobot?.[robotId] || defaultLineSpeedProfile();
+  };
+  const renderLineSpeedComparison = () => {
+    const currentRobot = lineRobotId();
+    const report = reportedLineProfiles.get(currentRobot);
+    const fresh = Boolean(report && Date.now() - report.receivedAt < 75000);
+    for (const field of LINE_SPEED_FIELDS) {
+      const input = document.getElementById(field.id);
+      if (!input) continue;
+      const fieldRow = input.closest(".settings-line-pwm-field");
+      const raw = input.value.trim();
+      const local = Number(raw);
+      const mismatch = fresh && (!raw || !Number.isInteger(local) || local !== report[field.key]);
+      input.classList.toggle("settings-line-pwm-mismatch", mismatch);
+      fieldRow?.classList.toggle("settings-line-pwm-mismatch-row", mismatch);
+      input.title = mismatch ? `ESP32 đang dùng ${report[field.key]} PWM` : "";
+    }
+    if (linePwmStatus) {
+      if (!report) {
+        linePwmStatus.textContent = linePwmActionMessage || "Chưa nhận cấu hình PWM từ ESP32. Bấm Hiển thị để yêu cầu dữ liệu.";
+      } else if (!fresh) {
+        linePwmStatus.textContent = `Dữ liệu ESP32 đã cũ (lần cuối ${new Date(report.receivedAt).toLocaleTimeString("vi-VN")}); đang đợi báo cáo mới.`;
+      } else {
+        const differences = LINE_SPEED_FIELDS.filter(field => {
+          const input = document.getElementById(field.id);
+          const raw = String(input?.value ?? "").trim();
+          return !raw || !Number.isInteger(Number(raw)) || Number(raw) !== report[field.key];
+        });
+        const confirm = pendingLineSpeedSeq && pendingLineSpeedRobot === currentRobot ?
+          "Đã gửi lệnh; chờ ESP32 phản hồi xác nhận. " : "";
+        linePwmStatus.textContent = confirm + (differences.length
+          ? `${differences.length} giá trị khác ESP32 (chữ số đỏ).`
+          : "5 giá trị khớp với cấu hình ESP32.");
+      }
+    }
+    if (linePwmActualValues) {
+      linePwmActualValues.textContent = "";
+      if (report) {
+        const details = document.createElement("div");
+        details.className = "settings-line-pwm-actual-list";
+        LINE_SPEED_FIELDS.forEach(field => {
+          const item = document.createElement("div");
+          const label = document.createElement("span");
+          label.textContent = field.label;
+          const value = document.createElement("strong");
+          value.textContent = String(report[field.key]);
+          item.append(label, value);
+          details.appendChild(item);
+        });
+        const time = document.createElement("small");
+        time.textContent = `Robot: ${currentRobot} • Nhận ${new Date(report.receivedAt).toLocaleTimeString("vi-VN")} • Nguồn: ${report.source || "không rõ"}`;
+        linePwmActualValues.append(details, time);
+      } else {
+        linePwmActualValues.textContent = "Chưa có dữ liệu từ ESP32.";
+      }
+    }
+  };
+  const sendLineSpeedSettings = () => {
+    let profile;
+    try { profile = readLineSpeedProfile(); }
+    catch (error) { alert(error.message); return false; }
+    const mqttBridge = window.ROBOT_CONTROL?.mqttBridge;
+    if (!mqttBridge?.connected || mqttBridge.robot !== Number(settingsRobotSelect?.value || robotSelect?.value || 1)) {
+      alert("MQTT chưa kết nối hoặc chưa chuyển sang đúng robot.");
+      return false;
+    }
+    const seq = ++lineSpeedSeq;
+    if (!mqttBridge.publishLineSpeedProfile(profile, seq)) {
+      alert("Không thể gửi tốc độ bám line tới MQTT.");
+      return false;
+    }
+    pendingLineSpeedSeq = seq;
+    pendingLineSpeedRobot = lineRobotId();
+    linePwmActionMessage = "Đã gửi MQTT, đang chờ ESP32 xác nhận...";
+    renderLineSpeedComparison();
+    return true;
+  };
+
+  // Bộ PWM quay hoàn toàn độc lập với 5 PWM bám line.
+  const TURN_PWM_FIELDS = [
+    { key: "forward_speed", id: "settingsTurnForwardPwm", fallback: 120, min: 0, max: 255, label: "Turn forward PWM" },
+    { key: "reverse_speed", id: "settingsTurnReversePwm", fallback: 120, min: 0, max: 255, label: "Turn reverse PWM" }
+  ];
+  const turnPwmStatus = document.getElementById("settingsTurnPwmStatus");
+  const turnPwmActualPanel = document.getElementById("settingsTurnPwmActualPanel");
+  const turnPwmActualValues = document.getElementById("settingsTurnPwmActualValues");
+  const turnPwmShowActualButton = document.getElementById("settingsTurnPwmShowActualButton");
+  const turnPwmSendButton = document.getElementById("settingsTurnPwmSendButton");
+  const reportedTurnProfiles = new Map();
+  let turnPwmSeq = 0;
+  let pendingTurnPwmSeq = 0;
+  let pendingTurnPwmRobot = null;
+  let turnPwmActionMessage = "";
+  const defaultTurnPwmProfile = () => Object.fromEntries(
+    TURN_PWM_FIELDS.map(field => [field.key, field.fallback])
+  );
+  const readTurnPwmProfile = () => {
+    const profile = {};
+    for (const field of TURN_PWM_FIELDS) {
+      const raw = String(document.getElementById(field.id)?.value ?? "").trim();
+      const number = Number(raw);
+      if (!raw || !Number.isInteger(number) || number < field.min || number > field.max) {
+        throw new Error(`${field.label}: nhập số nguyên ${field.min}–${field.max}.`);
+      }
+      profile[field.key] = number;
+    }
+    return profile;
+  };
+  const fillTurnPwmProfile = profile => {
+    for (const field of TURN_PWM_FIELDS) {
+      const input = document.getElementById(field.id);
+      const value = Number(profile?.[field.key]);
+      if (input) input.value = String(Number.isInteger(value) && value >= 0 && value <= 255
+        ? value : field.fallback);
+    }
+    renderTurnPwmComparison();
+  };
+  const storedTurnPwmProfile = robotId =>
+    readStoredSettings()?.turnPwmSettingsByRobot?.[robotId] || defaultTurnPwmProfile();
+
+  const renderTurnPwmComparison = () => {
+    const robotId = lineRobotId();
+    const report = reportedTurnProfiles.get(robotId);
+    const fresh = Boolean(report && Date.now() - report.receivedAt < 75000);
+    for (const field of TURN_PWM_FIELDS) {
+      const input = document.getElementById(field.id);
+      if (!input) continue;
+      const raw = input.value.trim();
+      const value = Number(raw);
+      const mismatch = fresh && (!raw || !Number.isInteger(value) || value !== report[field.key]);
+      input.classList.toggle("settings-line-pwm-mismatch", mismatch);
+      input.closest(".settings-turn-pwm-field")?.classList.toggle("settings-line-pwm-mismatch-row", mismatch);
+      input.title = mismatch ? `ESP32 đang dùng ${report[field.key]} PWM` : "";
+    }
+    if (turnPwmStatus) {
+      if (turnPwmActionMessage) {
+        turnPwmStatus.textContent = turnPwmActionMessage;
+      } else if (!report) {
+        turnPwmStatus.textContent = "Chưa nhận PWM quay từ ESP32. Bấm Hiển thị để lấy dữ liệu.";
+      } else if (!fresh) {
+        turnPwmStatus.textContent = "Dữ liệu PWM quay đã cũ; đang chờ báo cáo từ ESP32.";
+      } else {
+        const differences = TURN_PWM_FIELDS.filter(field => {
+          const raw = String(document.getElementById(field.id)?.value ?? "").trim();
+          return !raw || !Number.isInteger(Number(raw)) || Number(raw) !== report[field.key];
+        });
+        turnPwmStatus.textContent = differences.length
+          ? `${differences.length} PWM quay khác với ESP32 (hiển thị đỏ).`
+          : "Hai PWM quay khớp với ESP32.";
+      }
+    }
+    if (turnPwmActualValues) {
+      turnPwmActualValues.textContent = "";
+      if (report) {
+        const list = document.createElement("div");
+        list.className = "settings-line-pwm-actual-list";
+        for (const field of TURN_PWM_FIELDS) {
+          const item = document.createElement("div");
+          const label = document.createElement("span");
+          label.textContent = field.label;
+          const value = document.createElement("strong");
+          value.textContent = String(report[field.key]);
+          item.append(label, value);
+          list.appendChild(item);
+        }
+        const time = document.createElement("small");
+        time.textContent = `Robot: ${robotId} • Nhận ${new Date(report.receivedAt).toLocaleTimeString("vi-VN")} • Nguồn: ${report.source || "?"}`;
+        turnPwmActualValues.append(list, time);
+      } else {
+        turnPwmActualValues.textContent = "Chưa có dữ liệu từ ESP32.";
+      }
+    }
+  };
+
+  const sendTurnPwmSettings = () => {
+    let profile;
+    try { profile = readTurnPwmProfile(); }
+    catch (error) { alert(error.message); return false; }
+    const bridge = window.ROBOT_CONTROL?.mqttBridge;
+    const targetRobot = Number(settingsRobotSelect?.value || robotSelect?.value || 1);
+    if (!bridge?.connected || bridge.robot !== targetRobot) {
+      alert("MQTT chưa kết nối hoặc chưa chuyển đúng robot.");
+      return false;
+    }
+    const seq = ++turnPwmSeq;
+    if (!bridge.publishTurnSpeedProfile(profile, seq)) {
+      alert("Không gửi được PWM quay đến ESP32.");
+      return false;
+    }
+    pendingTurnPwmSeq = seq;
+    pendingTurnPwmRobot = lineRobotId();
+    turnPwmActionMessage = "Đã gửi MQTT, đang chờ ESP32 xác nhận. Chỉ áp dụng khi robot đã dừng.";
+    renderTurnPwmComparison();
+    return true;
+  };
+
   const settingsAdvancedUpdateServerButton = document.getElementById("settingsAdvancedUpdateServerButton");
   const settingsAdvancedSaveStorageButton = document.getElementById("settingsAdvancedSaveStorageButton");
   const settingsAdvancedUpdateEsp32Button = document.getElementById("settingsAdvancedUpdateEsp32Button");
@@ -1376,6 +1750,7 @@
       cornerEntrySpeed: saved?.cornerEntrySpeed ?? DEFAULT_CORNER_ENTRY_SPEED
     });
 
+
     const qrActionMinAreaPercent = normalizeQrAreaPercent(
       saved?.qrActionMinAreaPercent,
       DEFAULT_QR_ACTION_MIN_AREA_PERCENT
@@ -1389,7 +1764,11 @@
       settingsQrAreaPercent.value = String(qrActionMinAreaPercent);
     }
 
-    if (!saved) return { ...speedSettings, qrActionMinAreaPercent };
+    if (!saved) {
+      fillLineSpeedProfile(defaultLineSpeedProfile());
+      fillTurnPwmProfile(defaultTurnPwmProfile());
+      return { ...speedSettings, qrActionMinAreaPercent };
+    }
 
     if (settingsUTurnAngle) {
       settingsUTurnAngle.value = String(
@@ -1419,6 +1798,8 @@
       }
     }
 
+    fillLineSpeedProfile(saved?.lineSpeedSettingsByRobot?.[lineRobotId()] || defaultLineSpeedProfile());
+    fillTurnPwmProfile(saved?.turnPwmSettingsByRobot?.[lineRobotId()] || defaultTurnPwmProfile());
     return { ...speedSettings, qrActionMinAreaPercent };
   };
 
@@ -1453,12 +1834,24 @@
       rotateSpeed,
       advancedTurnSpeed: turnSpeed,
       lineFollowSpeed,
-      cornerEntrySpeed
+
+      cornerEntrySpeed,
+      // Không ghi đè profile của các robot khác khi lưu một robot.
+      lineSpeedSettingsByRobot: {
+        ...(readStoredSettings()?.lineSpeedSettingsByRobot || {}),
+        [lineRobotId()]: readLineSpeedProfile()
+      },
+      turnPwmSettingsByRobot: {
+        ...(readStoredSettings()?.turnPwmSettingsByRobot || {}),
+        [lineRobotId()]: readTurnPwmProfile()
+      }
     };
   };
 
   const saveSettingsToStorage = () => {
-    const data = collectSettings();
+    let data;
+    try { data = collectSettings(); }
+    catch (error) { alert(error.message); return; }
 
     if (settingsUTurnAngle) settingsUTurnAngle.value = String(data.uTurnAngle);
     if (settingsTurnAngle) settingsTurnAngle.value = String(data.turnAngle);
@@ -1836,7 +2229,9 @@
   };
 
   const updateSettingsToEsp32 = () => {
-    const data = collectSettings();
+    let data;
+    try { data = collectSettings(); }
+    catch (error) { alert(error.message); return; }
 
     applyRuntimeSpeedSettings({
       rotateSpeed: data.rotateSpeed,
@@ -1868,11 +2263,122 @@
         JSON.stringify(payload),
         { qos: 0, retain: false }
       );
-      alert("Đã gửi cài đặt tốc độ tới ESP32 qua MQTT.");
+      // Bản cũ giữ nguyên topicX/settings. Bổ sung SET PWM thật qua setting/tocdo.
+      // MQTT publish thành công chỉ là đã gửi; ESP32 xác nhận qua report topic.
+      if (sendLineSpeedSettings()) {
+        linePwmActionMessage = "Đã gửi lệnh PWM, chờ ESP32 phản hồi.";
+      }
+      sendTurnPwmSettings(); // Kênh setting/quay riêng; không sửa logic gyro/QR.
     } catch (_) {
       alert("Không thể gửi cài đặt tới ESP32.");
     }
   };
+
+  for (const field of LINE_SPEED_FIELDS) {
+    document.getElementById(field.id)?.addEventListener("input", renderLineSpeedComparison);
+  }
+  window.addEventListener("robot-line-speeds", ({ detail: report }) => {
+    if (!report || !/^robot[0-9]+$/.test(String(report.robot_id || ""))) return;
+    for (const field of LINE_SPEED_FIELDS) {
+      const value = report[field.key];
+      if (!Number.isInteger(value) || value < field.min || value > field.max) return;
+    }
+    reportedLineProfiles.set(report.robot_id, report);
+    if (report.robot_id === pendingLineSpeedRobot && report.seq === pendingLineSpeedSeq) {
+      pendingLineSpeedSeq = 0;
+      pendingLineSpeedRobot = null;
+      linePwmActionMessage = "Đã nhận ESP32 xác nhận áp dụng tốc độ.";
+    }
+    renderLineSpeedComparison();
+  });
+  const reloadRobotLineSpeedProfile = () => {
+    pendingLineSpeedSeq = 0;
+    pendingLineSpeedRobot = null;
+    linePwmActionMessage = "";
+    fillLineSpeedProfile(storedLineSpeedProfile(lineRobotId()));
+    window.ROBOT_CONTROL?.mqttBridge?.requestLineSpeedProfile?.();
+  };
+  settingsRobotSelect?.addEventListener("change", reloadRobotLineSpeedProfile);
+  robotSelect?.addEventListener("change", reloadRobotLineSpeedProfile);
+
+  linePwmShowActualButton?.addEventListener("click", () => {
+    const opening = Boolean(linePwmActualPanel?.hidden);
+    if (linePwmActualPanel) linePwmActualPanel.hidden = !opening;
+    linePwmShowActualButton.setAttribute("aria-expanded", String(opening));
+    linePwmShowActualButton.textContent = opening
+      ? "Ẩn tốc độ thực tế ESP32" : "Hiển thị tốc độ thực tế ESP32";
+    if (opening) {
+      const requested = window.ROBOT_CONTROL?.mqttBridge?.requestLineSpeedProfile?.();
+      linePwmActionMessage = requested
+        ? "Đã yêu cầu ESP32 báo cáo PWM đang áp dụng."
+        : "MQTT chưa kết nối, không thể yêu cầu dữ liệu ESP32.";
+    }
+    renderLineSpeedComparison();
+  });
+  linePwmSendButton?.addEventListener("click", () => {
+    if (sendLineSpeedSettings()) {
+      linePwmActionMessage = "Đã gửi lệnh PWM, chờ ESP32 phản hồi.";
+      renderLineSpeedComparison();
+    }
+  });
+  // Nhận riêng telemetry PWM quay; KHÔNG tính như alive hoặc can thiệp điều khiển.
+  for (const field of TURN_PWM_FIELDS) {
+    document.getElementById(field.id)?.addEventListener("input", () => {
+      turnPwmActionMessage = "";
+      renderTurnPwmComparison();
+    });
+  }
+  window.addEventListener("robot-turn-speeds", ({ detail: report }) => {
+    if (!report || !/^robot[0-9]+$/.test(String(report.robot_id || ""))) return;
+    for (const field of TURN_PWM_FIELDS) {
+      const value = report[field.key];
+      if (!Number.isInteger(value) || value < 0 || value > 255) return;
+    }
+    reportedTurnProfiles.set(report.robot_id, report);
+    if (report.robot_id === pendingTurnPwmRobot && report.seq === pendingTurnPwmSeq) {
+      pendingTurnPwmSeq = 0;
+      pendingTurnPwmRobot = null;
+      if (report.status === "applied") {
+        turnPwmActionMessage = "ESP32 đã lưu và áp dụng PWM quay. Lệnh quay tiếp theo sẽ dùng tốc độ mới.";
+      } else if (report.status === "busy") {
+        turnPwmActionMessage = "ESP32 từ chối: robot đang di chuyển. Hãy dừng robot rồi gửi lại.";
+      } else if (report.status === "invalid") {
+        turnPwmActionMessage = "ESP32 từ chối: PWM quay không hợp lệ.";
+      } else if (report.status === "storage_error") {
+        turnPwmActionMessage = "ESP32 không lưu được cấu hình vào bộ nhớ NVS.";
+      } else {
+        turnPwmActionMessage = "ESP32 đã phản hồi; kiểm tra trạng thái cấu hình.";
+      }
+    }
+    renderTurnPwmComparison();
+  });
+  const reloadRobotTurnPwmProfile = () => {
+    pendingTurnPwmSeq = 0;
+    pendingTurnPwmRobot = null;
+    turnPwmActionMessage = "";
+    fillTurnPwmProfile(storedTurnPwmProfile(lineRobotId()));
+    window.ROBOT_CONTROL?.mqttBridge?.requestTurnSpeedProfile?.();
+  };
+  settingsRobotSelect?.addEventListener("change", reloadRobotTurnPwmProfile);
+  robotSelect?.addEventListener("change", reloadRobotTurnPwmProfile);
+  turnPwmShowActualButton?.addEventListener("click", () => {
+    const opening = Boolean(turnPwmActualPanel?.hidden);
+    if (turnPwmActualPanel) turnPwmActualPanel.hidden = !opening;
+    turnPwmShowActualButton.setAttribute("aria-expanded", String(opening));
+    turnPwmShowActualButton.textContent = opening
+      ? "Ẩn PWM quay ESP32" : "Hiển thị PWM quay ESP32";
+    if (opening) {
+      const requested = window.ROBOT_CONTROL?.mqttBridge?.requestTurnSpeedProfile?.();
+      turnPwmActionMessage = requested
+        ? "Đã yêu cầu ESP32 báo PWM quay đang sử dụng."
+        : "MQTT chưa kết nối; chưa thể yêu cầu PWM quay.";
+    } else turnPwmActionMessage = "";
+    renderTurnPwmComparison();
+  });
+  turnPwmSendButton?.addEventListener("click", sendTurnPwmSettings);
+  // Chỉ để nhận biết telemetry không còn mới, không can thiệp điều khiển robot.
+  setInterval(renderLineSpeedComparison, 10000);
+  setInterval(renderTurnPwmComparison, 10000);
 
   settingsUpdateServerButton?.addEventListener("click", showServerNotConnectedMessage);
   settingsAdvancedUpdateServerButton?.addEventListener("click", showServerNotConnectedMessage);
